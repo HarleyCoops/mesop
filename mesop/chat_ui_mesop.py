@@ -3,7 +3,7 @@ from typing import List
 import os
 
 # Configure the API key (ensure this is handled securely in production)
-genai.configure(api_key="AIzaSyBanIAG_CqCdTdJLQ3ZJ10lEwt9FRIDfH8")  # Replace with your actual key
+genai.configure(api_key="XXX")  # Replace with your actual key
 
 import mesop as me
 import mesop.labs as mel
