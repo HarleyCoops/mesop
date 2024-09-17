@@ -6,6 +6,8 @@
   [readonly]="config().getReadonly()"
   [style]="getStyle()"
   (input)="onInput($event)"
+  (blur)="onBlur($event)"
+  (keydown)="onKeyDown($event)"
   [cdkTextareaAutosize]="config().getAutosize()"
   [cdkAutosizeMinRows]="config().getMinRows()"
   [cdkAutosizeMaxRows]="config().getMaxRows()"
@@ -32,7 +34,9 @@
     [value]="config().getValue()"
     [readonly]="config().getReadonly()"
     (input)="onInput($event)"
+    (blur)="onBlur($event)"
     [rows]="config().getRows()"
+    (keydown)="onKeyDown($event)"
     [cdkTextareaAutosize]="config().getAutosize()"
     [cdkAutosizeMinRows]="config().getMinRows()"
     [cdkAutosizeMaxRows]="config().getMaxRows()"
@@ -47,8 +51,10 @@
     [type]="config().getType()!"
     [value]="config().getValue()"
     [readonly]="config().getReadonly()"
+    (blur)="onBlur($event)"
     (input)="onInput($event)"
     (keyup)="onKeyUp($event)"
+    (keydown)="onKeyDown($event)"
   />
   }
 </mat-form-field>

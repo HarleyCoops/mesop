@@ -21,19 +21,30 @@ if current_dir not in sys.path:
 import glob
 
 import audio as audio
+import autocomplete as autocomplete
 import badge as badge
 import basic_animation as basic_animation
 import box as box
 import button as button
 import chat as chat
+import chat_inputs as chat_inputs
 import checkbox as checkbox
 import code_demo as code_demo  # cannot call it code due to python library naming conflict
+import density as density
+import dialog as dialog
 import divider as divider
 import embed as embed
+import fancy_chat as fancy_chat
+import feedback as feedback
+import form_billing as form_billing
+import form_profile as form_profile
+import grid_table as grid_table
+import headers as headers
 import html_demo as html_demo
 import icon as icon
 import image as image
 import input as input
+import link as link
 import llm_playground as llm_playground
 import llm_rewriter as llm_rewriter
 import markdown_demo as markdown_demo  # cannot call it markdown due to python library naming conflict
@@ -46,6 +57,7 @@ import select_demo as select_demo  # cannot call it select due to python library
 import sidenav as sidenav
 import slide_toggle as slide_toggle
 import slider as slider
+import snackbar as snackbar
 import table as table
 import text as text
 import text_to_image as text_to_image
@@ -80,15 +92,35 @@ FIRST_SECTIONS = [
   Section(
     name="Use cases",
     examples=[
+      Example(name="fancy_chat"),
       Example(name="llm_rewriter"),
       Example(name="llm_playground"),
       Example(name="markdown_editor"),
     ],
   ),
   Section(
+    name="Patterns",
+    examples=[
+      Example(name="dialog"),
+      Example(name="grid_table"),
+      Example(name="headers"),
+      Example(name="snackbar"),
+      Example(name="chat_inputs"),
+      Example(name="form_billing"),
+      Example(name="form_profile"),
+    ],
+  ),
+  Section(
+    name="Features",
+    examples=[
+      Example(name="density"),
+    ],
+  ),
+  Section(
     name="Misc",
     examples=[
       Example(name="basic_animation"),
+      Example(name="feedback"),
     ],
   ),
 ]
@@ -120,6 +152,7 @@ COMPONENTS_SECTIONS = [
   Section(
     name="Form",
     examples=[
+      Example(name="autocomplete"),
       Example(name="button"),
       Example(name="checkbox"),
       Example(name="input"),
@@ -144,10 +177,16 @@ COMPONENTS_SECTIONS = [
     ],
   ),
   Section(
-    name="Advanced",
+    name="Web",
     examples=[
       Example(name="embed"),
       Example(name="html_demo"),
+      Example(name="link"),
+    ],
+  ),
+  Section(
+    name="Others",
+    examples=[
       Example(name="plot"),
     ],
   ),
@@ -172,6 +211,10 @@ screenshots: dict[str, str] = {}
 
 
 def load_home_page(e: me.LoadEvent):
+  if me.state(ThemeState).dark_mode:
+    me.set_theme_mode("dark")
+  else:
+    me.set_theme_mode("system")
   yield
   screenshot_dir = os.path.join(current_dir, "screenshots")
   screenshot_files = glob.glob(os.path.join(screenshot_dir, "*.webp"))
@@ -196,6 +239,7 @@ def main_page():
   header()
   with me.box(
     style=me.Style(
+      background=me.theme_var("background"),
       flex_grow=1,
       display="flex",
     )
@@ -261,7 +305,7 @@ def example_card(name: str):
       cursor="pointer",
       width="min(100%, 150px)",
       border_radius=12,
-      background="#fff",
+      background=me.theme_var("background"),
     ),
   ):
     image_url = screenshots.get(name, "")
@@ -290,6 +334,10 @@ def example_card(name: str):
 
 
 def on_load_embed(e: me.LoadEvent):
+  if me.state(ThemeState).dark_mode:
+    me.set_theme_mode("dark")
+  else:
+    me.set_theme_mode("system")
   if not is_desktop():
     me.state(State).panel_fullscreen = "preview"
 
@@ -309,7 +357,7 @@ def create_main_fn(example: Example):
         height="100%",
         display="flex",
         flex_direction="column",
-        background="#fff",
+        background=me.theme_var("background"),
       )
     ):
       header(demo_name=example.name)
@@ -366,7 +414,7 @@ def demo_ui(src: str):
         "Preview",
         style=me.Style(
           font_weight=500,
-          padding=me.Padding.all(8),
+          padding=me.Padding.all(14),
         ),
       )
       if is_desktop():
@@ -389,7 +437,7 @@ def demo_ui(src: str):
       style=me.Style(
         border=me.Border.all(me.BorderSide(width=0)),
         border_radius=2,
-        height="calc(100vh - 155px)",
+        height="calc(100vh - 106px)",
         width="100%",
       ),
     )
@@ -432,6 +480,7 @@ def demo_code(code_arg: str):
       border=me.Border(
         left=BORDER_SIDE,
       ),
+      background=me.theme_var("surface-container-low"),
     )
   ):
     with me.box(
@@ -440,13 +489,14 @@ def demo_code(code_arg: str):
         justify_content="space-between",
         align_items="center",
         border=me.Border(bottom=BORDER_SIDE),
+        background=me.theme_var("background"),
       )
     ):
       me.text(
         "Code",
         style=me.Style(
           font_weight=500,
-          padding=me.Padding.all(8),
+          padding=me.Padding.all(14),
         ),
       )
       if not is_desktop():
@@ -454,7 +504,7 @@ def demo_code(code_arg: str):
     # Use four backticks for code fence to avoid conflicts with backticks being used
     # within the displayed code.
     me.markdown(
-      f"""````
+      f"""````python
 {code_arg}
 ````
               """,
@@ -463,8 +513,7 @@ def demo_code(code_arg: str):
           right=BORDER_SIDE,
         ),
         font_size=13,
-        padding=me.Padding.all(12),
-        height="calc(100vh - 120px)",
+        height="calc(100vh - 106px)",
         overflow_y="auto",
         width="100%",
       ),
@@ -514,25 +563,43 @@ def header(demo_name: str | None = None):
             align_items="baseline",
           ),
         ):
-          me.markdown(
-            "<a href='https://github.com/google/mesop/' target='_blank'>google/mesop</a>",
+          me.link(
+            text="google/mesop",
+            url="https://github.com/google/mesop/",
+            open_in_new_tab=True,
             style=me.Style(
               font_size=18,
+              color=me.theme_var("primary"),
+              text_decoration="none",
               margin=me.Margin(left=8, right=4, bottom=-16, top=-16),
-            ),
-          )
-          me.image(
-            src="https://github.githubassets.com/assets/GitHub-Mark-ea2971cee799.png",
-            style=me.Style(
-              height=36,
-              position="relative",
-              top=8,
             ),
           )
         me.text(
           "v" + me.__version__,
           style=me.Style(font_size=18, margin=me.Margin(left=16)),
         )
+        with me.content_button(
+          type="icon",
+          style=me.Style(left=8, right=4, top=4),
+          on_click=toggle_theme,
+        ):
+          me.icon(
+            "light_mode" if me.theme_brightness() == "dark" else "dark_mode"
+          )
+
+
+@me.stateclass
+class ThemeState:
+  dark_mode: bool
+
+
+def toggle_theme(e: me.ClickEvent):
+  if me.theme_brightness() == "light":
+    me.set_theme_mode("dark")
+    me.state(ThemeState).dark_mode = True
+  else:
+    me.set_theme_mode("light")
+    me.state(ThemeState).dark_mode = False
 
 
 def navigate_home(e: me.ClickEvent):
@@ -581,7 +648,7 @@ def nav_section(section: Section):
       example_name = format_example_name(example.name)
       path = f"/embed/{example.name}"
       with me.box(
-        style=me.Style(color="#0B57D0", cursor="pointer"),
+        style=me.Style(color=me.theme_var("primary"), cursor="pointer"),
         on_click=set_demo,
         key=path,
       ):
@@ -608,4 +675,4 @@ def get_module(module_name: str):
 
 
 def is_desktop():
-  return me.viewport_size().width > 640
+  return me.viewport_size().width > 760

@@ -11,8 +11,10 @@ import {
 } from '@angular/core';
 import {CommonModule} from '@angular/common';
 import {
+  ClickEvent,
   Component as ComponentProto,
   UserEvent,
+  WebComponentType,
 } from 'mesop/mesop/protos/ui_jspb_proto_pb/mesop/protos/ui_pb';
 import {ComponentLoader} from './component_loader';
 import {BoxType} from 'mesop/mesop/components/box/box_jspb_proto_pb/mesop/components/box/box_pb';
@@ -33,11 +35,15 @@ import {MatButtonModule} from '@angular/material/button';
 import {MatIconModule} from '@angular/material/icon';
 import {MatDividerModule} from '@angular/material/divider';
 import {formatStyle} from '../utils/styles';
-import {isComponentNameEquals} from '../utils/proto';
 import {MatTooltipModule} from '@angular/material/tooltip';
 import {TemplatePortal} from '@angular/cdk/portal';
+import {jsonParse} from '../utils/strict_types';
+import {MESOP_EVENT_NAME, MesopEvent} from './mesop_event';
+import {ErrorDialogService} from '../services/error_dialog_service';
 
-const CORE_NAMESPACE = 'me';
+export const COMPONENT_RENDERER_ELEMENT_NAME = 'component-renderer-element';
+
+const WEB_COMPONENT_PREFIX = '<web>';
 
 @Component({
   selector: 'component-renderer',
@@ -69,6 +75,7 @@ export class ComponentRenderer {
   isEditorMode: boolean;
   isEditorOverlayOpen = false;
   overlayRef?: OverlayRef;
+  customElement: HTMLElement | undefined;
 
   constructor(
     private channel: Channel,
@@ -77,6 +84,7 @@ export class ComponentRenderer {
     private elementRef: ElementRef,
     private overlay: Overlay,
     private viewContainerRef: ViewContainerRef,
+    private errorDialogService: ErrorDialogService,
   ) {
     this.isEditorMode = this.editorService.isEditorMode();
   }
@@ -97,6 +105,12 @@ export class ComponentRenderer {
   }
 
   ngOnDestroy() {
+    if (this.customElement) {
+      this.customElement.removeEventListener(
+        MESOP_EVENT_NAME,
+        this.dispatchCustomUserEvent,
+      );
+    }
     if (this.isEditorMode) {
       (this.elementRef.nativeElement as HTMLElement).removeEventListener(
         'mouseover',
@@ -120,11 +134,14 @@ export class ComponentRenderer {
     if (key) {
       return key;
     }
-    // Include the component type so that Angular
-    // knows that it's a new child, otherwise it gets confused
-    // and tries to pass in the new component properties into the
-    // old component and we get an error.
-    return `${index}___${item.getType()?.getName()}`;
+    // Include the component type and URL path in the key.
+    // This ensures Angular recognizes it as a new child component,
+    // preventing errors from passing new properties to old components
+    // and also avoiding DOM state accidentally being carried over.
+    // The URL path helps distinguish components across different routes.
+    const typeName = item.getType()?.getName();
+    const urlPath = window.location.pathname;
+    return `${index}___${typeName}___${urlPath}`;
   }
 
   isBoxType() {
@@ -143,6 +160,14 @@ export class ComponentRenderer {
   }
 
   ngOnChanges() {
+    if (this.customElement) {
+      // Update the custom element properties and events
+      this.updateCustomElement(this.customElement);
+
+      // Efficiently update children
+      this.updateCustomElementChildren();
+      return;
+    }
     if (isRegularComponent(this.component)) {
       this.updateComponentRef();
       return;
@@ -154,6 +179,71 @@ export class ComponentRenderer {
     }
 
     this.computeStyles();
+  }
+
+  updateCustomElement(customElement: HTMLElement) {
+    const webComponentType = WebComponentType.deserializeBinary(
+      this.component.getType()!.getValue() as unknown as Uint8Array,
+    );
+    const properties = jsonParse(
+      webComponentType.getPropertiesJson()!,
+    ) as object;
+    for (const key of Object.keys(properties)) {
+      const value = (properties as any)[key];
+      // We should have checked this in Python, but just in case
+      // we will check the property name right before using it.
+      checkPropertyNameIsSafe(key);
+      (customElement as any)[key] = value;
+    }
+
+    const events = jsonParse(webComponentType.getEventsJson()!) as object;
+    for (const event of Object.keys(events)) {
+      // We should have checked this in Python, but just in case
+      // we will check the property name right before using it.
+      checkPropertyNameIsSafe(event);
+      (customElement as any)[event] = (events as any)[event];
+    }
+    // Always try to remove the event listener since we will attach the event listener
+    // next. If the event listener wasn't already attached, then removeEventListener is
+    // effectively a no-op (i.e. it won't throw an error).
+    customElement.removeEventListener(
+      MESOP_EVENT_NAME,
+      this.dispatchCustomUserEvent,
+    );
+    if (Object.keys(events).length) {
+      customElement.addEventListener(
+        MESOP_EVENT_NAME,
+        this.dispatchCustomUserEvent,
+      );
+    }
+  }
+
+  private updateCustomElementChildren() {
+    const existingChildren = Array.from(
+      this.customElement!.querySelectorAll(COMPONENT_RENDERER_ELEMENT_NAME),
+    );
+    const newChildren = this.component.getChildrenList();
+
+    // Update or add children
+    for (let i = 0; i < newChildren.length; i++) {
+      const child = newChildren[i];
+      if (i < existingChildren.length) {
+        // Update existing child
+        (existingChildren[i] as any)['component'] = child;
+      } else {
+        // Add new child
+        const childElement = document.createElement(
+          COMPONENT_RENDERER_ELEMENT_NAME,
+        );
+        (childElement as any)['component'] = child;
+        this.customElement!.appendChild(childElement);
+      }
+    }
+
+    // Remove excess children
+    for (let i = newChildren.length; i < existingChildren.length; i++) {
+      this.customElement!.removeChild(existingChildren[i]);
+    }
   }
 
   ngDoCheck() {
@@ -219,14 +309,54 @@ export class ComponentRenderer {
     const componentClass = typeName.getCoreModule()
       ? typeToComponent[typeName.getFnName()!] || UserDefinedComponent // Some core modules rely on UserDefinedComponent
       : UserDefinedComponent;
-    // Need to insert at insertionRef and *not* viewContainerRef, otherwise
-    // the component (e.g. <mesop-text> will not be properly nested inside <component-renderer>).
-    this._componentRef = this.insertionRef.createComponent(
-      componentClass, // If it's an unrecognized type, we assume it's a user-defined component
-      options,
-    );
-    this.updateComponentRef();
+    if (typeName.getFnName()?.startsWith(WEB_COMPONENT_PREFIX)) {
+      const customElementName = typeName
+        .getFnName()!
+        .slice(WEB_COMPONENT_PREFIX.length);
+
+      // Check if the custom element is already defined
+      if (!customElements.get(customElementName)) {
+        const error = new Error(
+          `Expected web component '${customElementName}' to be registered by the JS module.
+
+Make sure the web component name is spelled the same between Python and JavaScript.`,
+        );
+        this.errorDialogService.showError(error);
+      }
+
+      this.customElement = document.createElement(customElementName);
+      this.updateCustomElement(this.customElement);
+
+      for (const child of this.component.getChildrenList()) {
+        const childElement = document.createElement(
+          COMPONENT_RENDERER_ELEMENT_NAME,
+        );
+        (childElement as any)['component'] = child;
+        this.customElement.appendChild(childElement);
+      }
+
+      this.insertionRef.element.nativeElement.parentElement.appendChild(
+        this.customElement,
+      );
+    } else {
+      // Need to insert at insertionRef and *not* viewContainerRef, otherwise
+      // the component (e.g. <mesop-text> will not be properly nested inside <component-renderer>).
+      this._componentRef = this.insertionRef.createComponent(
+        componentClass, // If it's an unrecognized type, we assume it's a user-defined / Python custom component
+        options,
+      );
+      this.updateComponentRef();
+    }
   }
+
+  dispatchCustomUserEvent = (event: Event) => {
+    const mesopEvent = event as MesopEvent<any>;
+    const userEvent = new UserEvent();
+    userEvent.setStringValue(JSON.stringify(mesopEvent.payload));
+    userEvent.setHandlerId(mesopEvent.handlerId);
+    userEvent.setKey(this.component.getKey());
+    this.channel.dispatch(userEvent);
+  };
 
   updateComponentRef() {
     if (this._componentRef) {
@@ -285,6 +415,9 @@ export class ComponentRenderer {
     const userEvent = new UserEvent();
     userEvent.setHandlerId(this._boxType.getOnClickHandlerId()!);
     userEvent.setKey(this.component.getKey());
+    const click = new ClickEvent();
+    click.setIsTarget(event.target === event.currentTarget);
+    userEvent.setClick(click);
     this.channel.dispatch(userEvent);
   }
 
@@ -300,7 +433,7 @@ export class ComponentRenderer {
     border-radius: 2px;
     `;
     }
-    return `border: 1px solid #1c6ef3;
+    return `border: 2px solid var(--sys-primary);
       border-radius: 4px;`;
   }
 
@@ -324,28 +457,6 @@ export class ComponentRenderer {
     return this.editorService.getSelectionMode();
   }
 
-  canAddChildComponent(): boolean {
-    return Boolean(
-      this.channel
-        .getComponentConfigs()
-        .find((c) =>
-          isComponentNameEquals(
-            c.getComponentName()!,
-            this.component.getType()?.getName(),
-          ),
-        )
-        ?.getAcceptsChild(),
-    );
-  }
-
-  addChildComponent(): void {
-    this.editorService.addComponentChild(this.component);
-  }
-
-  addSiblingComponent(): void {
-    this.editorService.addComponentSibling(this.component);
-  }
-
   SelectionMode = SelectionMode;
 
   getComponentName(): string {
@@ -366,4 +477,16 @@ function isRegularComponent(component: ComponentProto) {
     component.getType() &&
     !(typeName.getCoreModule() && typeName.getFnName() === 'box')
   );
+}
+
+// Note: the logic here should be kept in sync with
+// helper.py's check_property_keys_is_safe
+export function checkPropertyNameIsSafe(propertyName: string) {
+  const normalizedName = propertyName.toLowerCase();
+  if (
+    ['src', 'srcdoc'].includes(normalizedName) ||
+    normalizedName.startsWith('on')
+  ) {
+    throw new Error(`Unsafe property name '${propertyName}' cannot be used.`);
+  }
 }

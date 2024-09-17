@@ -4,7 +4,6 @@ import {
   Type,
 } from 'mesop/mesop/protos/ui_jspb_proto_pb/mesop/protos/ui_pb';
 import {AudioType} from 'mesop/mesop/components/audio/audio_jspb_proto_pb/mesop/components/audio/audio_pb';
-import {Channel} from '../../web/src/services/channel';
 
 @Component({
   selector: 'mesop-audio',
@@ -15,9 +14,6 @@ export class AudioComponent {
   @Input({required: true}) type!: Type;
   @Input() key!: Key;
   private _config!: AudioType;
-  isChecked = false;
-
-  constructor(private readonly channel: Channel) {}
 
   ngOnChanges() {
     this._config = AudioType.deserializeBinary(

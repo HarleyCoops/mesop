@@ -9,14 +9,17 @@ import {
   UiResponse,
   NavigationEvent,
   ComponentConfig,
-  EditorEvent,
   Command,
+  ChangePrefersColorScheme,
 } from 'mesop/mesop/protos/ui_jspb_proto_pb/mesop/protos/ui_pb';
 import {Logger} from '../dev_tools/services/logger';
 import {Title} from '@angular/platform-browser';
 import {SSE} from '../utils/sse';
 import {applyComponentDiff, applyStateDiff} from '../utils/diff';
 import {getViewportSize} from '../utils/viewport_size';
+import {ThemeService} from './theme_service';
+import {getQueryParams} from '../utils/query_params';
+import {ExperimentService} from './experiment_service';
 
 // Pick 500ms as the minimum duration before showing a progress/busy indicator
 // for the channel.
@@ -28,6 +31,7 @@ interface InitParams {
   onRender: (
     rootComponent: ComponentProto,
     componentConfigs: readonly ComponentConfig[],
+    jsModules: readonly string[],
   ) => void;
   onError: (error: ServerError) => void;
   onCommand: (command: Command) => void;
@@ -48,6 +52,7 @@ export class Channel {
   private eventSource!: SSE;
   private initParams!: InitParams;
   private states: States = new States();
+  private stateToken = '';
   private rootComponent?: ComponentProto;
   private status!: ChannelStatus;
   private componentConfigs: readonly ComponentConfig[] = [];
@@ -58,7 +63,15 @@ export class Channel {
   constructor(
     private logger: Logger,
     private title: Title,
-  ) {}
+    private themeService: ThemeService,
+    private experimentService: ExperimentService,
+  ) {
+    this.themeService.setOnChangePrefersColorScheme(() => {
+      const userEvent = new UserEvent();
+      userEvent.setChangePrefersColorScheme(new ChangePrefersColorScheme());
+      this.dispatch(userEvent);
+    });
+  }
 
   getStatus(): ChannelStatus {
     return this.status;
@@ -84,7 +97,7 @@ export class Channel {
   }
 
   init(initParams: InitParams, request: UiRequest) {
-    this.eventSource = new SSE('/ui', {
+    this.eventSource = new SSE('/__ui__', {
       payload: generatePayloadString(request),
     });
     this.status = ChannelStatus.OPEN;
@@ -120,6 +133,9 @@ export class Channel {
         console.debug('Server event: ', uiResponse.toObject());
         switch (uiResponse.getTypeCase()) {
           case UiResponse.TypeCase.UPDATE_STATE_EVENT: {
+            this.stateToken = uiResponse
+              .getUpdateStateEvent()!
+              .getStateToken()!;
             switch (uiResponse.getUpdateStateEvent()!.getTypeCase()) {
               case UpdateStateEvent.TypeCase.FULL_STATES: {
                 this.states = uiResponse
@@ -185,10 +201,23 @@ export class Channel {
               this.rootComponent = rootComponent;
             }
 
+            const experimentSettings = uiResponse
+              .getRender()!
+              .getExperimentSettings();
+            if (experimentSettings) {
+              this.experimentService.experimentalEditorToolbarEnabled =
+                experimentSettings.getExperimentalEditorToolbarEnabled() ??
+                false;
+            }
+
             this.componentConfigs = uiResponse
               .getRender()!
               .getComponentConfigsList();
-            onRender(this.rootComponent, this.componentConfigs);
+            onRender(
+              this.rootComponent,
+              this.componentConfigs,
+              uiResponse.getRender()!.getJsModulesList(),
+            );
             this.logger.log({
               type: 'RenderLog',
               states: this.states,
@@ -197,8 +226,22 @@ export class Channel {
             break;
           }
           case UiResponse.TypeCase.ERROR:
-            onError(uiResponse.getError()!);
-            console.log('error', uiResponse.getError());
+            if (
+              uiResponse.getError()?.getException() ===
+              'Token not found in state session backend.'
+            ) {
+              this.queuedEvents.unshift(() => {
+                console.warn(
+                  'Token not found in state session backend. Retrying user event.',
+                );
+                request.getUserEvent()!.clearStateToken();
+                request.getUserEvent()!.setStates(this.states);
+                this.init(this.initParams, request);
+              });
+            } else {
+              onError(uiResponse.getError()!);
+              console.log('error', uiResponse.getError());
+            }
             break;
           case UiResponse.TypeCase.TYPE_NOT_SET:
             throw new Error(`Unhandled case for server event: ${uiResponse}`);
@@ -208,19 +251,30 @@ export class Channel {
   }
 
   dispatch(userEvent: UserEvent) {
-    userEvent.setViewportSize(getViewportSize());
     // Every user event should have an event handler,
-    // except for navigation and resize.
+    // except for the ones below:
     if (
       !userEvent.getHandlerId() &&
       !userEvent.getNavigation() &&
-      !userEvent.getResize()
+      !userEvent.getResize() &&
+      !userEvent.getChangePrefersColorScheme()
     ) {
       // This is a no-op user event, so we don't send it.
       return;
     }
     const initUserEvent = () => {
-      userEvent.setStates(this.states);
+      if (this.stateToken) {
+        userEvent.setStateToken(this.stateToken);
+      } else {
+        userEvent.setStates(this.states);
+      }
+      // Make sure we compute these properties right before the user
+      // event is dispatched, otherwise this can cause a weird
+      // race condition.
+      userEvent.setViewportSize(getViewportSize());
+      userEvent.setThemeSettings(this.themeService.getThemeSettings());
+      userEvent.setQueryParamsList(getQueryParams());
+
       const request = new UiRequest();
       request.setUserEvent(userEvent);
       this.init(this.initParams, request);
@@ -235,18 +289,11 @@ export class Channel {
     }
   }
 
-  dispatchEditorEvent(event: EditorEvent) {
-    this.logger.log({type: 'EditorEventLog', editorEvent: event});
-    const request = new UiRequest();
-    request.setEditorEvent(event);
-    this.init(this.initParams, request);
-  }
-
   checkForHotReload() {
     const pollHotReloadEndpoint = async () => {
       try {
         const response = await fetch(
-          `/hot-reload?counter=${this.hotReloadCounter}`,
+          `/__hot-reload__?counter=${this.hotReloadCounter}`,
         );
         if (response.status === 200) {
           const text = await response.text();
@@ -288,6 +335,7 @@ export class Channel {
     const navigationEvent = new NavigationEvent();
     userEvent.setViewportSize(getViewportSize());
     userEvent.setNavigation(navigationEvent);
+    userEvent.setQueryParamsList(getQueryParams());
     request.setUserEvent(userEvent);
     this.init(this.initParams, request);
   }

@@ -7,7 +7,7 @@ You can run our unit tests using Bazel.
 ### Run tests
 
 ```sh
-bazel test //tests/...:all
+bazel test //mesop/...
 ```
 
 ## E2E tests
@@ -17,11 +17,11 @@ We use [Playwright](https://playwright.dev/) as our e2e test framework. Unlike m
 ### Run tests
 
 ```shell
-$ yarn playwright test
+yarn playwright test
 ```
 
 ### Debug tests
 
 ```shell
-$ yarn playwright test --debug
+yarn playwright test --debug
 ```

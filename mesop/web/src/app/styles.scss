@@ -140,21 +140,30 @@ $_tertiary: map.merge(map.get($_palettes, tertiary), $_rest);
 $primary: $_primary;
 $tertiary: $_tertiary;
 
-$light-theme: mat.define-theme(
-  (
-    color: (
-      theme-type: light,
-      primary: $_primary,
-      tertiary: $_tertiary,
-    ),
-  )
-);
+@function create-theme($density: 0) {
+  @return mat.define-theme(
+    (
+      color: (
+        theme-type: light,
+        primary: $_primary,
+        tertiary: $_tertiary,
+        use-system-variables: true,
+      ),
+      density: (
+        scale: $density,
+      ),
+    )
+  );
+}
+
+$light-theme: create-theme();
 $dark-theme: mat.define-theme(
   (
     color: (
       theme-type: dark,
       primary: $_primary,
       tertiary: $_tertiary,
+      use-system-variables: true,
     ),
   )
 );
@@ -165,6 +174,25 @@ $dark-theme: mat.define-theme(
 body {
   @include mat.all-component-themes($light-theme);
   @include mat.color-variants-backwards-compatibility($light-theme);
+  @include mat.system-level-colors($light-theme);
+
+  --mesop-editor-toolbar-background-rgb: 240, 237, 241;
+}
+
+body.dark-theme {
+  @include mat.system-level-colors($dark-theme);
+
+  --mesop-editor-toolbar-background-rgb: 31, 31, 35;
+}
+
+$density-scales: (-1, -2, -3, -4);
+@each $scale in $density-scales {
+  .theme-density-#{$scale} {
+    $density-theme: create-theme(
+      $density: $scale,
+    );
+    @include mat.all-component-densities($density-theme);
+  }
 }
 
 html,
@@ -178,14 +206,16 @@ body {
   // Use system font.
   font-family: var(--default-font-family);
   -webkit-font-smoothing: antialiased;
+
+  --mat-dialog-container-max-width: calc(90vw);
 }
 
 * {
   box-sizing: border-box;
 }
 
-// Need these as global styles since markdown HTML is rendered specially.
-.markdown * {
+// Need these as global styles since markdown HTML is not rendered through Angular.
+.error-box-markdown * {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -230,220 +260,320 @@ body {
   }
 }
 
-// Make it so wide code examples do not overflow. Instead show a horizontal scrollbar.
-mesop-markdown pre {
-  overflow-x: scroll;
+mesop-markdown {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: 400;
+  }
+
+  a {
+    color: var(--sys-primary);
+  }
+
+  p {
+    font-size: 16px;
+    line-height: 1.5;
+    letter-spacing: 0.5;
+    margin-bottom: 1.5;
+    font-weight: 400;
+  }
+
+  a:visited {
+    color: var(--sys-secondary);
+  }
+
+  // Make it so wide code examples do not overflow. Instead show a horizontal scrollbar.
+  pre {
+    margin: 0;
+    overflow-x: scroll;
+  }
+
+  .code-block {
+    border-radius: 8px;
+    background: var(--sys-surface-container-low);
+    overflow: hidden;
+    min-height: 57px; // The copy button gets cut off if there's only one line of text.
+    padding: 10px;
+    position: relative;
+  }
+
+  .code-block a.code-copy {
+    display: none;
+  }
+
+  .code-block:hover a.code-copy {
+    border: none;
+    border-radius: 50%;
+    display: inline-block;
+    color: var(--sys-on-surface);
+    height: 40px;
+    position: absolute;
+    text-align: center;
+    right: 10px;
+    width: 40px;
+  }
+
+  .code-block:hover a.code-copy span {
+    margin-top: 8px;
+  }
+
+  .code-block:hover a.code-copy:hover {
+    background: var(--sys-surface-container-highest);
+    cursor: pointer;
+  }
+
+  .code-block:hover a.code-copy:active {
+    background: transparent;
+    cursor: pointer;
+  }
+
+  // Add some basic style to the table mark up.
+  table,
+  th,
+  td {
+    border: 1px var(--sys-on-surface) solid;
+    border-collapse: collapse;
+    padding: 10px;
+  }
 }
 
-// Generated with pygments
-// pygmentize -S xcode -f html -a .highlight > style.css
-pre {
-  line-height: 125%;
+// Styles needed for the editor toolbar.
+
+.floating-editor-toolbar-autocomplete {
+  --mat-option-label-text-size: 0.9rem;
 }
-td.linenos .normal {
-  color: inherit;
-  background-color: transparent;
-  padding-left: 5px;
-  padding-right: 5px;
+
+/*
+Modified from: https://github.com/highlightjs/highlight.js/blob/main/src/styles/xcode.css
+
+XCode style (c) Angel Garcia <angelgarcia.mail@gmail.com>
+
+*/
+
+.hljs {
+  background: transparent;
+  color: black;
 }
-span.linenos {
-  color: inherit;
-  background-color: transparent;
-  padding-left: 5px;
-  padding-right: 5px;
+
+/* Gray DOCTYPE selectors like WebKit */
+.xml .hljs-meta {
+  color: #c0c0c0;
 }
-td.linenos .special {
-  color: #000000;
-  background-color: #ffffc0;
-  padding-left: 5px;
-  padding-right: 5px;
+
+.hljs-comment,
+.hljs-quote {
+  color: #007400;
 }
-span.linenos.special {
-  color: #000000;
-  background-color: #ffffc0;
-  padding-left: 5px;
-  padding-right: 5px;
+
+.hljs-tag,
+.hljs-attribute,
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-name {
+  color: #aa0d91;
 }
-.highlight .hll {
-  background-color: #ffffcc;
+
+.hljs-variable,
+.hljs-template-variable {
+  color: #3f6e74;
 }
-.highlight {
-  background: #ffffff;
-}
-.highlight .c {
-  color: #177500;
-} /* Comment */
-.highlight .err {
-  color: #000000;
-} /* Error */
-.highlight .k {
-  color: #a90d91;
-} /* Keyword */
-.highlight .l {
-  color: #1c01ce;
-} /* Literal */
-.highlight .n {
-  color: #000000;
-} /* Name */
-.highlight .o {
-  color: #000000;
-} /* Operator */
-.highlight .ch {
-  color: #177500;
-} /* Comment.Hashbang */
-.highlight .cm {
-  color: #177500;
-} /* Comment.Multiline */
-.highlight .cp {
-  color: #633820;
-} /* Comment.Preproc */
-.highlight .cpf {
-  color: #177500;
-} /* Comment.PreprocFile */
-.highlight .c1 {
-  color: #177500;
-} /* Comment.Single */
-.highlight .cs {
-  color: #177500;
-} /* Comment.Special */
-.highlight .kc {
-  color: #a90d91;
-} /* Keyword.Constant */
-.highlight .kd {
-  color: #a90d91;
-} /* Keyword.Declaration */
-.highlight .kn {
-  color: #a90d91;
-} /* Keyword.Namespace */
-.highlight .kp {
-  color: #a90d91;
-} /* Keyword.Pseudo */
-.highlight .kr {
-  color: #a90d91;
-} /* Keyword.Reserved */
-.highlight .kt {
-  color: #a90d91;
-} /* Keyword.Type */
-.highlight .ld {
-  color: #1c01ce;
-} /* Literal.Date */
-.highlight .m {
-  color: #1c01ce;
-} /* Literal.Number */
-.highlight .s {
+
+.hljs-code,
+.hljs-string,
+.hljs-meta .hljs-string {
   color: #c41a16;
-} /* Literal.String */
-.highlight .na {
+}
+
+.hljs-regexp,
+.hljs-link {
+  color: #0e0eff;
+}
+
+.hljs-title,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-number {
+  color: #1c00cf;
+}
+
+.hljs-section,
+.hljs-meta {
+  color: #643820;
+}
+
+.hljs-title.class_,
+.hljs-class .hljs-title,
+.hljs-type,
+.hljs-built_in,
+.hljs-params {
+  color: #5c2699;
+}
+
+.hljs-attr {
   color: #836c28;
-} /* Name.Attribute */
-.highlight .nb {
-  color: #a90d91;
-} /* Name.Builtin */
-.highlight .nc {
-  color: #3f6e75;
-} /* Name.Class */
-.highlight .no {
-  color: #000000;
-} /* Name.Constant */
-.highlight .nd {
-  color: #000000;
-} /* Name.Decorator */
-.highlight .ni {
-  color: #000000;
-} /* Name.Entity */
-.highlight .ne {
-  color: #000000;
-} /* Name.Exception */
-.highlight .nf {
-  color: #000000;
-} /* Name.Function */
-.highlight .nl {
-  color: #000000;
-} /* Name.Label */
-.highlight .nn {
-  color: #000000;
-} /* Name.Namespace */
-.highlight .nx {
-  color: #000000;
-} /* Name.Other */
-.highlight .py {
-  color: #000000;
-} /* Name.Property */
-.highlight .nt {
-  color: #000000;
-} /* Name.Tag */
-.highlight .nv {
-  color: #000000;
-} /* Name.Variable */
-.highlight .ow {
-  color: #000000;
-} /* Operator.Word */
-.highlight .mb {
-  color: #1c01ce;
-} /* Literal.Number.Bin */
-.highlight .mf {
-  color: #1c01ce;
-} /* Literal.Number.Float */
-.highlight .mh {
-  color: #1c01ce;
-} /* Literal.Number.Hex */
-.highlight .mi {
-  color: #1c01ce;
-} /* Literal.Number.Integer */
-.highlight .mo {
-  color: #1c01ce;
-} /* Literal.Number.Oct */
-.highlight .sa {
-  color: #c41a16;
-} /* Literal.String.Affix */
-.highlight .sb {
-  color: #c41a16;
-} /* Literal.String.Backtick */
-.highlight .sc {
-  color: #2300ce;
-} /* Literal.String.Char */
-.highlight .dl {
-  color: #c41a16;
-} /* Literal.String.Delimiter */
-.highlight .sd {
-  color: #c41a16;
-} /* Literal.String.Doc */
-.highlight .s2 {
-  color: #c41a16;
-} /* Literal.String.Double */
-.highlight .se {
-  color: #c41a16;
-} /* Literal.String.Escape */
-.highlight .sh {
-  color: #c41a16;
-} /* Literal.String.Heredoc */
-.highlight .si {
-  color: #c41a16;
-} /* Literal.String.Interpol */
-.highlight .sx {
-  color: #c41a16;
-} /* Literal.String.Other */
-.highlight .sr {
-  color: #c41a16;
-} /* Literal.String.Regex */
-.highlight .s1 {
-  color: #c41a16;
-} /* Literal.String.Single */
-.highlight .ss {
-  color: #c41a16;
-} /* Literal.String.Symbol */
-.highlight .bp {
-  color: #5b269a;
-} /* Name.Builtin.Pseudo */
-.highlight .fm {
-  color: #000000;
-} /* Name.Function.Magic */
-.highlight .vc {
-  color: #000000;
-} /* Name.Variable.Class */
-.highlight .vg {
-  color: #000000;
-} /* Name.Variable.Global */
-.highlight .vi {
-  color: #000000;
-} /* Name.Variable.Instance */
+}
+
+.hljs-subst {
+  color: #000;
+}
+
+.hljs-formula {
+  background-color: #eee;
+  font-style: italic;
+}
+
+.hljs-addition {
+  background-color: #baeeba;
+}
+
+.hljs-deletion {
+  background-color: #ffc8bd;
+}
+
+.hljs-selector-id,
+.hljs-selector-class {
+  color: #9b703f;
+}
+
+.hljs-doctag,
+.hljs-strong {
+  font-weight: bold;
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.dark-theme {
+  /*!
+  Modified from: https://github.com/highlightjs/highlight.js/blob/main/src/styles/github-dark-dimmed.css
+
+  Theme: GitHub Dark Dimmed
+  Description: Dark dimmed theme as seen on github.com
+  Author: github.com
+  Maintainer: @Hirse
+  Updated: 2021-05-15
+
+  Colors taken from GitHub's CSS
+*/
+
+  .hljs {
+    color: #adbac7;
+    background: transparent;
+  }
+
+  .hljs-doctag,
+  .hljs-keyword,
+  .hljs-meta .hljs-keyword,
+  .hljs-template-tag,
+  .hljs-template-variable,
+  .hljs-type,
+  .hljs-variable.language_ {
+    /* prettylights-syntax-keyword */
+    color: #f47067;
+  }
+
+  .hljs-title,
+  .hljs-title.class_,
+  .hljs-title.class_.inherited__,
+  .hljs-title.function_ {
+    /* prettylights-syntax-entity */
+    color: #dcbdfb;
+  }
+
+  .hljs-attr,
+  .hljs-attribute,
+  .hljs-literal,
+  .hljs-meta,
+  .hljs-number,
+  .hljs-operator,
+  .hljs-variable,
+  .hljs-selector-attr,
+  .hljs-selector-class,
+  .hljs-selector-id {
+    /* prettylights-syntax-constant */
+    color: #6cb6ff;
+  }
+
+  .hljs-regexp,
+  .hljs-string,
+  .hljs-meta .hljs-string {
+    /* prettylights-syntax-string */
+    color: #96d0ff;
+  }
+
+  .hljs-built_in,
+  .hljs-symbol {
+    /* prettylights-syntax-variable */
+    color: #f69d50;
+  }
+
+  .hljs-comment,
+  .hljs-code,
+  .hljs-formula {
+    /* prettylights-syntax-comment */
+    color: #768390;
+  }
+
+  .hljs-name,
+  .hljs-quote,
+  .hljs-selector-tag,
+  .hljs-selector-pseudo {
+    /* prettylights-syntax-entity-tag */
+    color: #8ddb8c;
+  }
+
+  .hljs-subst {
+    /* prettylights-syntax-storage-modifier-import */
+    color: #adbac7;
+  }
+
+  .hljs-section {
+    /* prettylights-syntax-markup-heading */
+    color: #316dca;
+    font-weight: bold;
+  }
+
+  .hljs-bullet {
+    /* prettylights-syntax-markup-list */
+    color: #eac55f;
+  }
+
+  .hljs-emphasis {
+    /* prettylights-syntax-markup-italic */
+    color: #adbac7;
+    font-style: italic;
+  }
+
+  .hljs-strong {
+    /* prettylights-syntax-markup-bold */
+    color: #adbac7;
+    font-weight: bold;
+  }
+
+  .hljs-addition {
+    /* prettylights-syntax-markup-inserted */
+    color: #b4f1b4;
+    background-color: #1b4721;
+  }
+
+  .hljs-deletion {
+    /* prettylights-syntax-markup-deleted */
+    color: #ffd8d3;
+    background-color: #78191b;
+  }
+
+  .hljs-char.escape_,
+  .hljs-link,
+  .hljs-params,
+  .hljs-property,
+  .hljs-punctuation,
+  .hljs-tag {
+    color: #6cb6ff;
+  }
+}

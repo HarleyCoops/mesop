@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(kw_only=True)
@@ -12,9 +13,10 @@ class ClickEvent(MesopEvent):
 
   Attributes:
       key (str): key of the component that emitted this event.
+      is_target (bool): Whether the clicked target is the component which attached the event handler.
   """
 
-  pass
+  is_target: bool
 
 
 @dataclass(kw_only=True)
@@ -43,3 +45,15 @@ class LoadEvent:
   """
 
   path: str
+
+
+@dataclass(kw_only=True)
+class WebEvent(MesopEvent):
+  """An event emitted by a web component.
+
+  Attributes:
+      value: The value associated with the web event.
+      key (str): key of the component that emitted this event.
+  """
+
+  value: Any

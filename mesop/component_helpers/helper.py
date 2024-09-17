@@ -1,18 +1,32 @@
 import hashlib
 import inspect
-from functools import wraps
-from typing import Any, Callable, Generator, Type, TypeVar, cast, overload
+import json
+from dataclasses import is_dataclass
+from enum import Enum
+from functools import lru_cache, partial, wraps
+from typing import (
+  Any,
+  Callable,
+  Generator,
+  KeysView,
+  Type,
+  TypeVar,
+  cast,
+  overload,
+)
 
 from google.protobuf import json_format
 from google.protobuf.message import Message
 
 import mesop.protos.ui_pb2 as pb
 from mesop.component_helpers.style import Style, to_style_proto
-from mesop.events import ClickEvent, InputEvent, MesopEvent
+from mesop.events import ClickEvent, InputEvent, MesopEvent, WebEvent
 from mesop.exceptions import MesopDeveloperException
 from mesop.key import Key, key_from_proto
 from mesop.runtime import runtime
-from mesop.utils.caller import get_caller_source_code_location
+from mesop.utils.caller import (
+  get_app_caller_source_code_location,
+)
 from mesop.utils.validate import validate
 
 
@@ -45,6 +59,10 @@ class _ComponentWithChildren:
 
 
 def slot():
+  """
+  This function is used when defining a content component to mark a place in the component tree where content
+  can be provided by a child component.
+  """
   runtime().context().save_current_node_as_slot()
 
 
@@ -125,7 +143,7 @@ def component(
       component = prev_current_node.children.add()
       source_code_location = None
       if runtime().debug_mode:
-        source_code_location = get_caller_source_code_location(levels=2)
+        source_code_location = get_app_caller_source_code_location()
       component.MergeFrom(
         create_component(
           component_name=get_component_name(fn),
@@ -217,7 +235,7 @@ def insert_composite_component(
 ) -> _ComponentWithChildren:
   source_code_location = None
   if runtime().debug_mode:
-    source_code_location = get_caller_source_code_location(levels=7)
+    source_code_location = get_app_caller_source_code_location()
   return _ComponentWithChildren(
     type_name=type_name,
     proto=proto,
@@ -227,6 +245,69 @@ def insert_composite_component(
   )
 
 
+def insert_web_component(
+  *,
+  name: str,
+  events: dict[str, Callable[[WebEvent], Any]] | None = None,
+  properties: dict[str, Any] | None = None,
+  key: str | None = None,
+):
+  """
+  Inserts a web component into the current component tree.
+
+  Args:
+    name: The name of the web component. This should match the custom element name defined in JavaScript.
+    events: A dictionary where the key is the event name, which must match a web component property name defined in JavaScript.
+            The value is the event handler (callback) function.
+            Keys must not be "src", "srcdoc", or start with "on" to avoid web security risks.
+    properties: A dictionary where the key is the web component property name that's defined in JavaScript and the value is the
+                 property value which is plumbed to the JavaScript component.
+                 Keys must not be "src", "srcdoc", or start with "on" to avoid web security risks.
+    key: A unique identifier for the web component. Defaults to None.
+  """
+  if events is None:
+    events = dict()
+  if properties is None:
+    properties = dict()
+  check_property_keys_is_safe(events.keys())
+  check_property_keys_is_safe(properties.keys())
+  event_to_ids: dict[str, str] = {}
+  for event in events:
+    event_handler = events[event]
+    event_to_ids[event] = register_event_handler(event_handler, WebEvent)
+  type_proto = pb.WebComponentType(
+    properties_json=json.dumps(properties),
+    events_json=json.dumps(event_to_ids),
+  )
+  return insert_composite_component(
+    # Prefix with <web> to ensure there's never any overlap with built-in components.
+    type_name="<web>" + name,
+    proto=type_proto,
+    key=key,
+  )
+
+
+# Note: the logic here should be kept in sync with
+# component_renderer.ts's checkAttributeNameIsSafe
+#
+# We check here in Python to provide a better error message and
+# developer experience.
+def check_property_keys_is_safe(keys: KeysView[str]):
+  """
+  Follow web security best practices by ensuring dangerous attributes
+  aren't used by raising an exception.
+  """
+  for key in keys:
+    # Lowercase the key because DOM attributes are case insensitive
+    normalized_key = key.lower()
+    # https://security.stackexchange.com/a/139861
+    if normalized_key in ["src", "srcdoc"] or normalized_key.startswith("on"):
+      raise MesopDeveloperException(
+        f"Cannot use '{key}' as a key for insert_web_component events or properties because this can cause web security issues."
+      )
+
+
+# TODO: remove insert_custom_component
 def insert_custom_component(
   component_name: str,
   proto: Message,
@@ -253,7 +334,7 @@ def insert_component(
   """
   source_code_location = None
   if runtime().debug_mode:
-    source_code_location = get_caller_source_code_location(levels=7)
+    source_code_location = get_app_caller_source_code_location()
   runtime().context().current_node().children.append(
     create_component(
       component_name=pb.ComponentName(core_module=True, fn_name=type_name),
@@ -280,14 +361,18 @@ def wrap_handler_with_event(func: Handler[E], actionType: Type[E]):
 
     return func(cast(Any, event))
 
-  wrapper.__module__ = func.__module__
-  wrapper.__name__ = func.__name__
+  if isinstance(func, partial):
+    wrapper.__module__ = func.func.__module__
+    wrapper.__name__ = func.func.__name__
+  else:
+    wrapper.__module__ = func.__module__
+    wrapper.__name__ = func.__name__
 
   return wrapper
 
 
 def register_event_handler(
-  handler_fn: Callable[..., Any], event: Type[Any]
+  handler_fn: Callable[..., Any], event: Type[E]
 ) -> str:
   fn_id = compute_fn_id(handler_fn)
 
@@ -297,13 +382,67 @@ def register_event_handler(
   return fn_id
 
 
+def has_stable_repr(obj: Any) -> bool:
+  """Check if an object has a stable repr.
+  We need to ensure that the repr is stable between different Python runtimes.
+  """
+  stable_types = (int, float, str, bool, type(None), tuple, frozenset, Enum)  # type: ignore
+
+  if isinstance(obj, stable_types):
+    return True
+  if is_dataclass(obj):
+    return all(
+      has_stable_repr(getattr(obj, f.name))
+      for f in obj.__dataclass_fields__.values()
+    )
+  if isinstance(obj, (list, set)):
+    return all(has_stable_repr(item) for item in obj)  # type: ignore
+  if isinstance(obj, dict):
+    return all(
+      has_stable_repr(k) and has_stable_repr(v)
+      for k, v in obj.items()  # type: ignore
+    )
+
+  return False
+
+
+@lru_cache(maxsize=None)
 def compute_fn_id(fn: Callable[..., Any]) -> str:
-  source_code = inspect.getsource(fn)
+  if isinstance(fn, partial):
+    func_source = inspect.getsource(fn.func)
+    # For partial functions, we need to ensure that the arguments have a stable repr
+    # because we use the repr to compute the fn_id.
+    for arg in fn.args:
+      if not has_stable_repr(arg):
+        raise MesopDeveloperException(
+          f"Argument {arg} for functools.partial event handler {fn.func.__name__} does not have a stable repr"
+        )
+
+    for k, v in fn.keywords.items():
+      if not has_stable_repr(v):
+        raise MesopDeveloperException(
+          f"Keyword argument {k}={v} for functools.partial event handler {fn.func.__name__} does not have a stable repr"
+        )
+
+    args_str = ", ".join(repr(arg) for arg in fn.args)
+    kwargs_str = ", ".join(f"{k}={v!r}" for k, v in fn.keywords.items())
+    partial_args = (
+      f"{args_str}{', ' if args_str and kwargs_str else ''}{kwargs_str}"
+    )
+
+    source_code = f"partial(<<{func_source}>>, {partial_args})"
+    fn_name = fn.func.__name__
+    fn_module = fn.func.__module__
+  else:
+    source_code = inspect.getsource(fn) if inspect.isfunction(fn) else str(fn)
+    fn_name = fn.__name__
+    fn_module = fn.__module__
+
   # Skip hashing the fn/module name in debug mode because it makes it hard to debug.
   if runtime().debug_mode:
     source_code_hash = hashlib.sha256(source_code.encode()).hexdigest()
-    return f"{fn.__module__}.{fn.__name__}.{source_code_hash}"
-  input = f"{fn.__module__}.{fn.__name__}.{source_code}"
+    return f"{fn_module}.{fn_name}.{source_code_hash}"
+  input = f"{fn_module}.{fn_name}.{source_code}"
   return hashlib.sha256(input.encode()).hexdigest()
 
 
@@ -331,14 +470,24 @@ runtime().register_event_mapper(
   ClickEvent,
   lambda userEvent, key: ClickEvent(
     key=key.key,
+    is_target=userEvent.click.is_target,
   ),
 )
+
 
 runtime().register_event_mapper(
   InputEvent,
   lambda userEvent, key: InputEvent(
     value=userEvent.string_value,
     key=key.key,
+  ),
+)
+
+runtime().register_event_mapper(
+  WebEvent,
+  lambda userEvent, key: WebEvent(
+    key=key.key,
+    value=json.loads(userEvent.string_value),
   ),
 )
 

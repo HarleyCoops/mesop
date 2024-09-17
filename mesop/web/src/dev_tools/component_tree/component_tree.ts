@@ -23,7 +23,6 @@ import {EditorService} from '../../services/editor_service';
 import {CommonModule} from '@angular/common';
 import {MatTooltipModule} from '@angular/material/tooltip';
 import {Channel} from '../../services/channel';
-import {isComponentNameEquals} from '../../utils/proto';
 
 const ROOT_NODE_TEXT = '<root>';
 
@@ -130,25 +129,6 @@ export class ComponentTree {
 
   isNodeSelected(node: FlatNode): boolean {
     return this.editorService.getFocusedComponent() === node.proto;
-  }
-
-  canAddChildComponent(node: FlatNode): boolean {
-    return Boolean(
-      this.channel
-        .getComponentConfigs()
-        .find((c) =>
-          isComponentNameEquals(c.getComponentName()!, node.componentName),
-        )
-        ?.getAcceptsChild(),
-    );
-  }
-
-  addChildComponent(node: FlatNode): void {
-    this.editorService.addComponentChild(node.proto);
-  }
-
-  addSiblingComponent(node: FlatNode): void {
-    this.editorService.addComponentSibling(node.proto);
   }
 
   onMouseenter(node: FlatNode): void {

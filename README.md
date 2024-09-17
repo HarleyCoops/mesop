@@ -1,5 +1,9 @@
 # Mesop: Build delightful web apps quickly in Python 🚀
 
+[![PyPI](https://img.shields.io/pypi/v/mesop)](https://pypi.org/project/mesop/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/mesop)](https://pypi.org/project/mesop/)
+[![Twitter follow](https://img.shields.io/twitter/follow/mesop_dev?style=social&label=follow)](https://twitter.com/mesop_dev)
+
 - If you're interested in learning how to use Mesop, please [read our main docs](https://google.github.io/mesop/).
 
 - If you're interested in contributing to the core Mesop framework, please [read our contributing guide](https://google.github.io/mesop/internal/contributing/).
@@ -62,7 +66,7 @@ You can try [Mesop on Colab](https://colab.research.google.com/github/google/mes
 **Step 1:** Install it
 
 ```sh
-$ pip install mesop
+pip install mesop
 ```
 
 **Step 2:** Copy the example above into `main.py`
@@ -70,10 +74,10 @@ $ pip install mesop
 **Step 3:** Run the app
 
 ```sh
-$ mesop main.py
+mesop main.py
 ```
 
-Learn more in [Getting Started](https://google.github.io/mesop/getting_started/installing/).
+Learn more in [Getting Started](https://google.github.io/mesop/getting-started/installing/).
 
 ## Disclaimer
 

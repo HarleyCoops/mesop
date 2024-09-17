@@ -4,6 +4,7 @@ from typing import Any, Callable, TypeVar, cast
 
 from mesop.colab.colab_run import colab_run as colab_run
 from mesop.colab.colab_show import colab_show as colab_show
+from mesop.commands.focus_component import focus_component as focus_component
 from mesop.commands.navigate import navigate as navigate
 from mesop.commands.scroll_into_view import scroll_into_view as scroll_into_view
 from mesop.component_helpers import (
@@ -31,6 +32,21 @@ from mesop.component_helpers.helper import (
   slot as slot,
 )
 from mesop.components.audio.audio import audio as audio
+from mesop.components.autocomplete.autocomplete import (
+  AutocompleteEnterEvent as AutocompleteEnterEvent,
+)
+from mesop.components.autocomplete.autocomplete import (
+  AutocompleteOption as AutocompleteOption,
+)
+from mesop.components.autocomplete.autocomplete import (
+  AutocompleteOptionGroup as AutocompleteOptionGroup,
+)
+from mesop.components.autocomplete.autocomplete import (
+  AutocompleteSelectionChangeEvent as AutocompleteSelectionChangeEvent,
+)
+from mesop.components.autocomplete.autocomplete import (
+  autocomplete as autocomplete,
+)
 from mesop.components.badge.badge import badge as badge
 
 # REF(//scripts/scaffold_component.py):insert_component_import_export
@@ -60,12 +76,22 @@ from mesop.components.html.html import html as html
 from mesop.components.icon.icon import icon as icon
 from mesop.components.image.image import image as image
 from mesop.components.input.input import EnterEvent as EnterEvent
+from mesop.components.input.input import InputBlurEvent as InputBlurEvent
+from mesop.components.input.input import InputEnterEvent as InputEnterEvent
+from mesop.components.input.input import Shortcut as Shortcut
+from mesop.components.input.input import (
+  TextareaShortcutEvent as TextareaShortcutEvent,
+)
 from mesop.components.input.input import input as input
 from mesop.components.input.input import native_textarea as native_textarea
 from mesop.components.input.input import textarea as textarea
+from mesop.components.link.link import link as link
 from mesop.components.markdown.markdown import markdown as markdown
 from mesop.components.plot.plot import (
   plot as plot,
+)
+from mesop.components.progress_bar.progress_bar import (
+  ProgressBarAnimationEndEvent as ProgressBarAnimationEndEvent,
 )
 from mesop.components.progress_bar.progress_bar import (
   progress_bar as progress_bar,
@@ -81,6 +107,9 @@ from mesop.components.radio.radio import (
 )
 from mesop.components.radio.radio import (
   radio as radio,
+)
+from mesop.components.select.select import (
+  SelectOpenedChangeEvent as SelectOpenedChangeEvent,
 )
 from mesop.components.select.select import (
   SelectOption as SelectOption,
@@ -150,22 +179,29 @@ from mesop.exceptions import (
   MesopUserException as MesopUserException,
 )
 from mesop.features import page as page
+from mesop.features.query_params import query_params as query_params
+from mesop.features.theme import set_theme_density as set_theme_density
+from mesop.features.theme import set_theme_mode as set_theme_mode
+from mesop.features.theme import theme_brightness as theme_brightness
+from mesop.features.theme import theme_var as theme_var
 from mesop.features.viewport_size import Size as Size
 from mesop.features.viewport_size import viewport_size as viewport_size
 from mesop.key import Key as Key
 from mesop.runtime import runtime
 from mesop.security.security_policy import SecurityPolicy as SecurityPolicy
-from mesop.server.wsgi_app import wsgi_app
+from mesop.server.wsgi_app import create_wsgi_app as create_wsgi_app
 from mesop.version import VERSION
 
 __version__ = VERSION
+
+_wsgi_app = create_wsgi_app(debug_mode=False)
 
 
 class _WsgiAppModule(types.ModuleType):
   def __call__(
     self, environ: dict[Any, Any], start_response: Callable[..., Any]
   ):
-    return wsgi_app(environ, start_response)
+    return _wsgi_app(environ, start_response)
 
 
 sys.modules[__name__].__class__ = _WsgiAppModule

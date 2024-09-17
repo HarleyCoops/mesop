@@ -31,21 +31,45 @@ SAMPLE_MARKDOWN = """
 ### Unordered List
 - Item 1
 - Item 2
-  - Subitem 2.1
-  - Subitem 2.2
+    - Subitem 2.1
+    - Subitem 2.2
 
 ### Ordered List
 1. First item
 2. Second item
-   1. Subitem 2.1
-   2. Subitem 2.2
+    1. Subitem 2.1
+    2. Subitem 2.2
 
 ## Links
 [Google](https://www.google.com/)
 
-## Code
+## Inline Code
+
 Inline `code`
+
+## Code
+
+```python
+import mesop as me
+
+
+@me.page(path="/hello_world")
+def app():
+  me.text("Hello World")
+```
+
+
+## Table
+
+First Header  | Second Header
+------------- | -------------
+Content Cell  | Content Cell
+Content Cell  | Content Cell
 """
+
+
+def on_load(e: me.LoadEvent):
+  me.set_theme_mode("system")
 
 
 @me.page(
@@ -53,6 +77,10 @@ Inline `code`
     allowed_iframe_parents=["https://google.github.io"]
   ),
   path="/markdown_demo",
+  on_load=on_load,
 )
 def app():
-  me.markdown(SAMPLE_MARKDOWN)
+  with me.box(
+    style=me.Style(background=me.theme_var("surface-container-lowest"))
+  ):
+    me.markdown(SAMPLE_MARKDOWN, style=me.Style(margin=me.Margin.all(15)))

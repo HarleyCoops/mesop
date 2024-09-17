@@ -1,18 +1,37 @@
 import base64
+import inspect
+import json
+import os
+import secrets
 import time
 import urllib.parse as urlparse
-from typing import Generator, Sequence
+from typing import Any, Generator, Sequence
+from urllib import request as urllib_request
+from urllib.error import URLError
 
 from flask import Flask, Response, abort, request, stream_with_context
 
 import mesop.protos.ui_pb2 as pb
 from mesop.component_helpers import diff_component
 from mesop.editor.component_configs import get_component_configs
-from mesop.editor.editor_handler import handle_editor_event
 from mesop.events import LoadEvent
 from mesop.exceptions import format_traceback
 from mesop.runtime import runtime
+from mesop.server.config import app_config
+from mesop.server.constants import WEB_COMPONENTS_PATH_SEGMENT
+from mesop.utils.url_utils import remove_url_query_param
 from mesop.warn import warn
+
+AI_SERVICE_BASE_URL = os.environ.get(
+  "MESOP_AI_SERVICE_BASE_URL", "http://localhost:43234"
+)
+
+EXPERIMENTAL_EDITOR_TOOLBAR_ENABLED = (
+  os.environ.get("MESOP_EXPERIMENTAL_EDITOR_TOOLBAR", "false").lower() == "true"
+)
+
+if EXPERIMENTAL_EDITOR_TOOLBAR_ENABLED:
+  print("Experiment enabled: EXPERIMENTAL_EDITOR_TOOLBAR_ENABLED")
 
 LOCALHOSTS = (
   # For IPv4 localhost
@@ -57,6 +76,11 @@ def configure_flask_app(
       # (e.g. scroll into view) for the same context (e.g. multiple render loops
       # when processing a generator handler function)
       runtime().context().clear_commands()
+      js_modules = runtime().context().js_modules()
+      # Similar to above, clear JS modules after sending it once to minimize payload.
+      # Although it shouldn't cause any issue because client-side, each js module
+      # should only be imported once.
+      runtime().context().clear_js_modules()
       data = pb.UiResponse(
         render=pb.RenderEvent(
           root_component=root_component,
@@ -66,6 +90,15 @@ def configure_flask_app(
           if prod_mode or not init_request
           else get_component_configs(),
           title=title,
+          js_modules=[
+            f"/{WEB_COMPONENTS_PATH_SEGMENT}{js_module}"
+            for js_module in js_modules
+          ],
+          experiment_settings=pb.ExperimentSettings(
+            experimental_editor_toolbar_enabled=EXPERIMENTAL_EDITOR_TOOLBAR_ENABLED,
+          )
+          if init_request
+          else None,
         )
       )
       yield serialize(data)
@@ -106,10 +139,18 @@ def configure_flask_app(
         yield from yield_errors(runtime().get_loading_errors()[0])
 
       if ui_request.HasField("init"):
+        runtime().context().set_theme_settings(ui_request.init.theme_settings)
         runtime().context().set_viewport_size(ui_request.init.viewport_size)
+        runtime().context().initialize_query_params(
+          ui_request.init.query_params
+        )
         page_config = runtime().get_page_config(path=ui_request.path)
         if page_config and page_config.on_load:
-          result = page_config.on_load(LoadEvent(path=ui_request.path))
+          result = page_config.on_load(
+            LoadEvent(
+              path=ui_request.path,
+            )
+          )
           # on_load is a generator function then we need to iterate through
           # the generator object.
           if result:
@@ -125,8 +166,15 @@ def configure_flask_app(
         yield STREAM_END
       elif ui_request.HasField("user_event"):
         event = ui_request.user_event
+        runtime().context().set_theme_settings(event.theme_settings)
         runtime().context().set_viewport_size(event.viewport_size)
-        runtime().context().update_state(event.states)
+        runtime().context().initialize_query_params(event.query_params)
+
+        if event.states.states:
+          runtime().context().update_state(event.states)
+        else:
+          runtime().context().restore_state_from_session(event.state_token)
+
         for _ in render_loop(path=ui_request.path, trace_mode=True):
           pass
         if ui_request.user_event.handler_id:
@@ -156,7 +204,14 @@ def configure_flask_app(
             )
           for command in runtime().context().commands():
             if command.HasField("navigate"):
-              path = command.navigate.url
+              runtime().context().initialize_query_params(
+                command.navigate.query_params
+              )
+              if command.navigate.url.startswith(("http://", "https://")):
+                yield from render_loop(path=path)
+                yield STREAM_END
+                return
+              path = remove_url_query_param(command.navigate.url)
               page_config = runtime().get_page_config(path=path)
               if (
                 page_config
@@ -178,16 +233,6 @@ def configure_flask_app(
           runtime().context().reset_current_node()
         yield create_update_state_event(diff=True)
         yield STREAM_END
-      elif ui_request.HasField("editor_event"):
-        # Prevent accidental usages of editor mode outside of
-        # one's local computer
-        if request.remote_addr not in LOCALHOSTS:
-          abort(403)  # Throws a Forbidden Error
-        # Visual editor should only be enabled in debug mode.
-        if not runtime().debug_mode:
-          abort(403)  # Throws a Forbidden Error
-        handle_editor_event(ui_request.editor_event)
-        yield STREAM_END
       else:
         raise Exception(f"Unknown request type: {ui_request}")
 
@@ -198,7 +243,7 @@ def configure_flask_app(
         error=pb.ServerError(exception=str(e), traceback=format_traceback())
       )
 
-  @flask_app.route("/ui", methods=["POST"])
+  @flask_app.route("/__ui__", methods=["POST"])
   def ui_stream() -> Response:
     # Prevent CSRF by checking the request site matches the site
     # of the URL root (where the Flask app is being served from)
@@ -208,7 +253,7 @@ def configure_flask_app(
     if not runtime().debug_mode and not is_same_site(
       request.headers.get("Origin"), request.url_root
     ):
-      abort(403, "Rejecting cross-site POST request to /ui")
+      abort(403, "Rejecting cross-site POST request to /__ui__")
     data = request.data
     if not data:
       raise Exception("Missing request payload")
@@ -231,9 +276,133 @@ def configure_flask_app(
     global _requests_in_flight
     _requests_in_flight -= 1
 
+  @flask_app.teardown_request
+  def teardown_clear_stale_state_sessions(error=None):
+    runtime().context().clear_stale_state_sessions()
+
   if not prod_mode:
 
-    @flask_app.route("/hot-reload")
+    @flask_app.route("/__editor__/commit", methods=["POST"])
+    def page_commit() -> Response:
+      check_editor_access()
+
+      try:
+        data = request.get_json()
+      except json.JSONDecodeError:
+        return Response("Invalid JSON format", status=400)
+      code = data.get("code")
+      path = data.get("path")
+      page_config = runtime().get_page_config(path=path)
+      assert page_config
+      module = inspect.getmodule(page_config.page_fn)
+      assert module
+      module_file = module.__file__
+      assert module_file
+      module_file_path = module.__file__
+      assert module_file_path
+      with open(module_file_path, "w") as file:
+        file.write(code)
+
+      response_data = {"message": "Page commit successful"}
+      return Response(
+        json.dumps(response_data), status=200, mimetype="application/json"
+      )
+
+    @flask_app.route("/__editor__/save-interaction", methods=["POST"])
+    def save_interaction() -> Response | dict[str, str]:
+      check_editor_access()
+
+      data = request.get_json()
+      if not data:
+        return Response("Invalid JSON data", status=400)
+
+      try:
+        req = urllib_request.Request(
+          AI_SERVICE_BASE_URL + "/save-interaction",
+          data=json.dumps(data).encode("utf-8"),
+          headers={"Content-Type": "application/json"},
+        )
+        with urllib_request.urlopen(req) as response:
+          if response.status == 200:
+            folder = json.loads(response.read().decode("utf-8"))["folder"]
+            return {"folder": folder}
+          else:
+            print(f"Error from AI service: {response.read().decode('utf-8')}")
+            return Response(
+              f"Error from AI service: {response.read().decode('utf-8')}",
+              status=500,
+            )
+      except URLError as e:
+        return Response(
+          f"Error making request to AI service: {e!s}", status=500
+        )
+
+    @flask_app.route("/__editor__/generate", methods=["POST"])
+    def page_generate():
+      check_editor_access()
+
+      try:
+        data = request.get_json()
+      except json.JSONDecodeError:
+        return Response("Invalid JSON format", status=400)
+      if not data:
+        return Response("Invalid JSON data", status=400)
+
+      prompt = data.get("prompt")
+      if not prompt:
+        return Response("Missing 'prompt' in JSON data", status=400)
+
+      path = data.get("path")
+      page_config = runtime().get_page_config(path=path)
+
+      line_number = data.get("lineNumber")
+      assert page_config
+      module = inspect.getmodule(page_config.page_fn)
+      if module is None:
+        return Response("Could not retrieve module source code.", status=500)
+      module_file = module.__file__
+      assert module_file
+      with open(module_file) as file:
+        source_code = file.read()
+      print(f"Source code of module {module.__name__}:")
+
+      def generate():
+        try:
+          for event in sse_request(
+            AI_SERVICE_BASE_URL + "/adjust-mesop-app",
+            {"prompt": prompt, "code": source_code, "lineNumber": line_number},
+          ):
+            if event.get("type") == "end":
+              sse_data = {
+                "type": "end",
+                "prompt": prompt,
+                "path": path,
+                "beforeCode": source_code,
+                "afterCode": event["code"],
+                "diff": event["diff"],
+                "message": "Prompt processed successfully",
+              }
+              yield f"data: {json.dumps(sse_data)}\n\n"
+              break
+            elif event.get("type") == "progress":
+              sse_data = {"data": event["data"], "type": "progress"}
+              yield f"data: {json.dumps(sse_data)}\n\n"
+            elif event.get("type") == "error":
+              sse_data = {"error": event["error"], "type": "error"}
+              yield f"data: {json.dumps(sse_data)}\n\n"
+              break
+            else:
+              raise Exception(f"Unknown event type: {event}")
+        except Exception as e:
+          sse_data = {
+            "error": "Could not connect to AI service: " + str(e),
+            "type": "error",
+          }
+          yield f"data: {json.dumps(sse_data)}\n\n"
+
+      return Response(generate(), content_type="text/event-stream")
+
+    @flask_app.route("/__hot-reload__")
     def hot_reload() -> Response:
       counter = int(request.args["counter"])
       while True:
@@ -247,9 +416,26 @@ def configure_flask_app(
   return flask_app
 
 
+def check_editor_access():
+  if not EXPERIMENTAL_EDITOR_TOOLBAR_ENABLED:
+    abort(403)  # Throws a Forbidden Error
+  # Prevent accidental usages of editor mode outside of
+  # one's local computer
+  if request.remote_addr not in LOCALHOSTS:
+    abort(403)  # Throws a Forbidden Error
+  # Visual editor should only be enabled in debug mode.
+  if not runtime().debug_mode:
+    abort(403)  # Throws a Forbidden Error
+
+
 def serialize(response: pb.UiResponse) -> str:
   encoded = base64.b64encode(response.SerializeToString()).decode("utf-8")
   return f"data: {encoded}\n\n"
+
+
+def generate_state_token():
+  """Generates a state token used to cache and look up Mesop state."""
+  return secrets.token_urlsafe(16)
 
 
 def create_update_state_event(diff: bool = False) -> str:
@@ -261,21 +447,22 @@ def create_update_state_event(diff: bool = False) -> str:
   Returns:
     serialized `pb.UiResponse`
   """
-  if diff:
-    return serialize(
-      pb.UiResponse(
-        update_state_event=pb.UpdateStateEvent(
-          diff_states=runtime().context().diff_state()
-        )
-      )
-    )
-  return serialize(
-    pb.UiResponse(
-      update_state_event=pb.UpdateStateEvent(
-        full_states=runtime().context().serialize_state()
-      )
-    )
+
+  state_token = ""
+
+  # If enabled, we will save the user's state on the server, so that the client does not
+  # need to send the full state back on the next user event request.
+  if app_config.state_session_enabled:
+    state_token = generate_state_token()
+    runtime().context().save_state_to_session(state_token)
+
+  update_state_event = pb.UpdateStateEvent(
+    state_token=state_token,
+    diff_states=runtime().context().diff_state() if diff else None,
+    full_states=runtime().context().serialize_state() if not diff else None,
   )
+
+  return serialize(pb.UiResponse(update_state_event=update_state_event))
 
 
 def is_same_site(url1: str | None, url2: str | None):
@@ -291,3 +478,30 @@ def is_same_site(url1: str | None, url2: str | None):
     return p1.hostname == p2.hostname
   except ValueError:
     return False
+
+
+SSE_DATA_PREFIX = "data: "
+
+
+def sse_request(
+  url: str, data: dict[str, Any]
+) -> Generator[dict[str, Any], None, None]:
+  """
+  Make an SSE request and yield JSON parsed events.
+  """
+  headers = {
+    "Content-Type": "application/json",
+    "Accept": "text/event-stream",
+  }
+  encoded_data = json.dumps(data).encode("utf-8")
+  req = urllib_request.Request(
+    url, data=encoded_data, headers=headers, method="POST"
+  )
+
+  with urllib_request.urlopen(req) as response:
+    for line in response:
+      if line.strip():
+        decoded_line = line.decode("utf-8").strip()
+        if decoded_line.startswith(SSE_DATA_PREFIX):
+          event_data = json.loads(decoded_line[len(SSE_DATA_PREFIX) :])
+          yield event_data

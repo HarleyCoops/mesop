@@ -2,7 +2,7 @@
 
 ## Overview
 
-Pages allow you to build multi-page applications by decorating Python functions with `me.page`. To learn more, read the see [multi-pages guide](../guides/multi_pages.md).
+Pages allow you to build multi-page applications by decorating Python functions with `me.page`. To learn more, read the see [multi-pages guide](../guides/multi-pages.md).
 
 ## Examples
 
@@ -35,7 +35,7 @@ def foo():
 ## API
 
 ::: mesop.features.page.page
-
+::: mesop.security.security_policy.SecurityPolicy
 ::: mesop.events.events.LoadEvent
 
 ## `on_load`

@@ -4,6 +4,7 @@ import {
   Key,
   Type,
   UserEvent,
+  Style,
 } from 'mesop/mesop/protos/ui_jspb_proto_pb/mesop/protos/ui_pb';
 import {
   UploaderType,
@@ -11,6 +12,7 @@ import {
   UploadedFile,
 } from 'mesop/mesop/components/uploader/uploader_jspb_proto_pb/mesop/components/uploader/uploader_pb';
 import {Channel} from '../../web/src/services/channel';
+import {formatStyle} from '../../web/src/utils/styles';
 
 @Component({
   selector: 'mesop-uploader',
@@ -22,8 +24,8 @@ import {Channel} from '../../web/src/services/channel';
 export class UploaderComponent {
   @Input({required: true}) type!: Type;
   @Input() key!: Key;
+  @Input() style!: Style;
   private _config!: UploaderType;
-  private _filename = '';
 
   constructor(private readonly channel: Channel) {}
 
@@ -43,10 +45,6 @@ export class UploaderComponent {
     return this._config.getAcceptedFileTypeList().join(',');
   }
 
-  filename(): string {
-    return this._filename;
-  }
-
   async onFileSelected(event: Event) {
     const target = event.target as HTMLInputElement;
     const files = target.files as FileList;
@@ -62,12 +60,6 @@ export class UploaderComponent {
       uploaded_file.setMimeType(files[i].type);
       uploaded_file.setContents(new Uint8Array(buffer));
       uploadEvent.addFile(uploaded_file);
-
-      if (i === 0) {
-        this._filename = files[i].name;
-      } else {
-        this._filename = 'Multiple files selected.';
-      }
     }
 
     const userEvent = new UserEvent();
@@ -75,5 +67,9 @@ export class UploaderComponent {
     userEvent.setKey(this.key);
     userEvent.setBytesValue(uploadEvent.serializeBinary());
     this.channel.dispatch(userEvent);
+  }
+
+  getStyle(): string {
+    return formatStyle(this.style);
   }
 }

@@ -15,10 +15,13 @@ py_library(
     srcs = [
         "__init__.py",
     ],
+    data = glob([".env"]),
     visibility = ["//build_defs:mesop_users"],
     deps = [
         ":version",
         # REF(//scripts/scaffold_component.py):insert_component_import
+        "//mesop/components/autocomplete:py",
+        "//mesop/components/link:py",
         "//mesop/components/html:py",
         "//mesop/components/uploader:py",
         "//mesop/components/code:py",
