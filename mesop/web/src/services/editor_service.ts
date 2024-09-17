@@ -10,14 +10,6 @@ export enum SelectionMode {
 
 /** Simple service to detect whether we are in editor mode. */
 export class EditorService {
-  addComponentSibling(component: ComponentProto) {
-    console.warn('Tried calling: `addComponentSibling` no-op function');
-  }
-
-  addComponentChild(component: ComponentProto) {
-    console.warn('Tried calling: `addComponentChild` no-op function');
-  }
-
   isEditorMode(): boolean {
     return false;
   }
@@ -31,6 +23,8 @@ export class EditorService {
   toggleSelectionMode(): void {}
 
   setFocusedComponent(component: ComponentProto): void {}
+
+  setOnSelectedComponent(callback: (component: ComponentProto) => void) {}
 
   getFocusedComponent(): ComponentProto | undefined {
     return DEFAULT_INSTANCE;

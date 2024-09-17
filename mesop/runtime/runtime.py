@@ -1,3 +1,4 @@
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable, Generator, Type, TypeVar, cast
 
@@ -38,32 +39,39 @@ T = TypeVar("T")
 
 
 class Runtime:
-  _path_to_page_config: dict[str, PageConfig] = {}
-  _handlers: dict[str, Handler]
-  _state_classes: list[type[Any]]
-  _loading_errors: list[pb.ServerError]
-  component_fns: set[Callable[..., Any]]
-  debug_mode: bool = False
-  # If True, then the server is still re-executing the modules
-  # needed for hot reloading.
-  is_hot_reload_in_progress: bool = False
-  # Keeps track of the hot reload count so that the server can tell
-  # clients polling whether to request a hot reload.
-  hot_reload_counter = 0
-
   def __init__(self):
-    self.component_fns = set()
-    self._handlers = {}
+    self.debug_mode: bool = False
+    # If True, then the server is still re-executing the modules
+    # needed for hot reloading.
+    self.is_hot_reload_in_progress: bool = False
+    # Keeps track of the hot reload count so that the server can tell
+    # clients polling whether to request a hot reload.
+    self.hot_reload_counter = 0
+    self._path_to_page_config: dict[str, PageConfig] = {}
+    self.component_fns: set[Callable[..., Any]] = set()
+    self._handlers: dict[str, Handler] = {}
     self.event_mappers: dict[Type[Any], Callable[[pb.UserEvent, Key], Any]] = {}
-    self._state_classes = []
-    self._loading_errors = []
+    self._state_classes: list[type[Any]] = []
+    self._loading_errors: list[pb.ServerError] = []
+    self._has_served_traffic = False
 
   def context(self) -> Context:
-    if "context" not in g:
-      g.context = self.create_context()
-    return g.context
+    if "_mesop_context" not in g:
+      g._mesop_context = self.create_context()
+    return g._mesop_context
 
   def create_context(self) -> Context:
+    # If running in prod mode, *always* enable the has served traffic safety check.
+    # If running in debug mode, *disable* the has served traffic safety check.
+    #
+    # We don't want to break iterative development where notebook app developers
+    # will want to register pages after traffic has been served.
+    # Unlike CLI (w/ hot reload), in notebook envs, runtime is *not* reset.
+    #
+    # For unclear reasons detecting `colab_utils.is_running_ipython` does
+    # *not* work here.
+    if not self.debug_mode:
+      self._has_served_traffic = True
     if len(self._state_classes) == 0:
       states = {EmptyState: EmptyState()}
     else:
@@ -91,7 +99,7 @@ class Runtime:
       paths = list(self._path_to_page_config.keys())
       if not paths:
         raise MesopDeveloperException(
-          """No page has been registered. Read the [page docs](https://google.github.io/mesop/guides/pages/) to configure a page.
+          """No page has been registered. Read the [page docs](https://google.github.io/mesop/api/page/) to configure a page.
 
 If you configured a page, then there was an exception in your code before the page was registered. Check your logs for more details.
           """
@@ -107,10 +115,17 @@ Try one of the following paths:
     self._path_to_page_config[path].page_fn()
 
   def register_page(self, *, path: str, page_config: PageConfig) -> None:
+    if self._has_served_traffic:
+      raise MesopDeveloperException(
+        "Cannot register a page after traffic has been served. You must register all pages upon server startup before any traffic has been served. This prevents security issues."
+      )
     self._path_to_page_config[path] = page_config
 
   def get_page_config(self, *, path: str) -> PageConfig | None:
     return self._path_to_page_config.get(path)
+
+  def get_path_to_page_configs(self) -> dict[str, PageConfig]:
+    return deepcopy(self._path_to_page_config)
 
   def register_handler(self, handler_id: str, handler: Handler) -> None:
     self._handlers[handler_id] = handler
@@ -133,6 +148,12 @@ Try one of the following paths:
 
   def register_native_component_fn(self, component_fn: Callable[..., Any]):
     self.component_fns.add(component_fn)
+
+  def check_register_web_component_is_valid(self) -> None:
+    if self._has_served_traffic:
+      raise MesopDeveloperException(
+        "Cannot register a web component after traffic has been served. You must define all web components upon server startup before any traffic has been served. This prevents security issues."
+      )
 
   def get_component_fns(self) -> set[Callable[..., Any]]:
     return self.component_fns

@@ -17,19 +17,21 @@ For example, if the current version is: `0.7.0`, then you should increment the v
 From the workspace root, run the following command:
 
 ```sh
-$ source ./scripts/pip.sh
+source ./scripts/pip.sh
 ```
 
 This will build the Mesop pip package and install it locally so you can test it.
 
 ## Testing locally
 
+> TIP: Double check the Mesop version is expected. It's easy to use the wrong version of Mesop by loading `mesop` or `gunicorn` from a different Python path (i.e. not the venv you just created).
+
 ### Dev CLI
 
 The above shell script will run the following command:
 
 ```sh
-$ mesop main.py
+mesop main.py
 ```
 
 This will start the Mesop dev server and you can test that hot reload works.
@@ -37,8 +39,10 @@ This will start the Mesop dev server and you can test that hot reload works.
 ### Gunicorn integration
 
 ```sh
-$ pip install gunicorn && gunicorn main:me
+gunicorn main:me
 ```
+
+> Note: `gunicorn` should already be installed by the shell script above.
 
 ## Upload to PyPI
 
@@ -60,7 +64,15 @@ Visit [https://pypi.org/project/mesop/](https://pypi.org/project/mesop/) to see 
 
 Because Colab installs from PyPI, you will need to test the RC on Colab after uploading to PyPI.
 
-Open our [Mesop Colab notebook](https://colab.research.google.com/github/google/mesop/blob/main/notebooks/mesop_colab_getting_started.ipynb) and run all the cells and make sure it works. Usually if something breaks in Colab, it's pretty obvious because the output isn't displayed, etc.
+Open our [Mesop Colab notebook](https://colab.research.google.com/github/google/mesop/blob/main/notebooks/mesop_colab_getting_started.ipynb). You will need to explicitly pip install the RC version as pip will _not_ automatically install a pre-release version, even if it's the newest version. So change the first cell to something like:
+
+```sh
+ !pip install mesop==0.X.Yrc0
+```
+
+> Tip: sometimes it takes a minute for the PyPI registry to be updated after upload, so just try again.
+
+Then, run all the cells and make sure it works. Usually if something breaks in Colab, it's pretty obvious because the output isn't displayed, etc.
 
 ## Change the version from RC to regular release
 
@@ -71,6 +83,15 @@ If all the testing looks good, then you can update [`mesop/version.py`](https://
 `0.8.0rc0` -> `0.8.0`
 
 Re-do the steps above to build, test and upload it to PyPI.
+
+## Publish GitHub release
+
+After you've uploaded a new regular release to PyPI, submit the PR which bumps the version and then [publish a GitHub release](https://github.com/google/mesop/releases/new).
+
+1. Click "Choose a tag" and type in the version you just released. This will create a new Git tag.
+1. Click "Genereate release notes".
+1. Click "Create a discussion for this release".
+1. Click "Publish release".
 
 ## First-time upload setup
 

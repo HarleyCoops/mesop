@@ -6,15 +6,17 @@ package(
 
 py_library(
     name = "utils",
-    srcs = glob(["*.py"]),
+    srcs = glob(
+        ["*.py"],
+        exclude = ["*_test.py"],
+    ),
     deps = ["//mesop/protos:ui_py_pb2"] + PYTHON_RUNFILES_DEP + THIRD_PARTY_PY_PYDANTIC,
 )
 
 py_test(
-    name = "caller_test",
-    srcs = ["caller_test.py"],
+    name = "url_utils_test",
+    srcs = ["url_utils_test.py"],
     deps = [
         ":utils",
-        "//mesop/protos:ui_py_pb2",
     ] + THIRD_PARTY_PY_PYTEST,
 )

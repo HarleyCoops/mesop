@@ -1,10 +1,12 @@
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import pandas as pd
 import pytest
 
+from mesop.components.uploader.uploaded_file import UploadedFile
 from mesop.dataclass_utils.dataclass_utils import diff_state
 from mesop.exceptions import MesopException
 
@@ -394,19 +396,71 @@ def test_diff_nested_pandas():
   ]
 
 
-# The diff will pass, but the Mesop JSON serializer currently fails on sets in state class.
-# See https://github.com/google/mesop/issues/387
+def test_diff_uploaded_file():
+  @dataclass
+  class C:
+    data: UploadedFile
+
+  s1 = C(data=UploadedFile())
+  s2 = C(
+    data=UploadedFile(b"data", name="file.png", size=10, mime_type="image/png")
+  )
+
+  assert json.loads(diff_state(s1, s2)) == [
+    {
+      "path": ["data"],
+      "action": "mesop_uploaded_file_changed",
+      "value": {
+        "__mesop.UploadedFile__": {
+          "contents": "ZGF0YQ==",
+          "name": "file.png",
+          "size": 10,
+          "mime_type": "image/png",
+        },
+      },
+    }
+  ]
+
+
+def test_diff_uploaded_file_same_no_diff():
+  @dataclass
+  class C:
+    data: UploadedFile
+
+  s1 = C(
+    data=UploadedFile(b"data", name="file.png", size=10, mime_type="image/png")
+  )
+  s2 = C(
+    data=UploadedFile(b"data", name="file.png", size=10, mime_type="image/png")
+  )
+
+  assert json.loads(diff_state(s1, s2)) == []
+
+
 def test_diff_set():
   @dataclass
   class C:
     val1: set[int] = field(default_factory=lambda: {1, 2, 3})
 
   s1 = C()
-  s2 = C(val1={1})
+  s2 = C(val1={1, 5})
 
   assert json.loads(diff_state(s1, s2)) == [
-    {"path": ["val1"], "value": 2, "action": "set_item_removed"},
-    {"path": ["val1"], "value": 3, "action": "set_item_removed"},
+    {
+      "path": ["val1", "__python.set__"],
+      "value": 2,
+      "action": "set_item_removed",
+    },
+    {
+      "path": ["val1", "__python.set__"],
+      "value": 3,
+      "action": "set_item_removed",
+    },
+    {
+      "path": ["val1", "__python.set__"],
+      "value": 5,
+      "action": "set_item_added",
+    },
   ]
 
 
@@ -438,6 +492,39 @@ def test_diff_not_dataclass():
 
   with pytest.raises(MesopException):
     diff_state("s1", C())
+
+
+def test_diff_dates():
+  @dataclass
+  class C:
+    val1: set = field(default_factory=set)
+
+  s1 = C()
+  s2 = C(
+    val1={
+      datetime(1972, 2, 2, tzinfo=timezone.utc),
+      datetime(2005, 10, 12, tzinfo=timezone(timedelta(hours=-5))),
+      datetime(2024, 12, 5, tzinfo=timezone(timedelta(hours=5, minutes=30))),
+    }
+  )
+
+  assert json.loads(diff_state(s1, s2)) == [
+    {
+      "path": ["val1", "__python.set__"],
+      "value": {"__datetime.datetime__": "2024-12-05T00:00:00+05:30"},
+      "action": "set_item_added",
+    },
+    {
+      "path": ["val1", "__python.set__"],
+      "value": {"__datetime.datetime__": "1972-02-02T00:00:00+00:00"},
+      "action": "set_item_added",
+    },
+    {
+      "path": ["val1", "__python.set__"],
+      "value": {"__datetime.datetime__": "2005-10-12T00:00:00-05:00"},
+      "action": "set_item_added",
+    },
+  ]
 
 
 if __name__ == "__main__":

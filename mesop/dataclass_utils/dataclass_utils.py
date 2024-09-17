@@ -1,6 +1,8 @@
+# ruff: noqa: E721
 import base64
 import json
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import Field, asdict, dataclass, field, is_dataclass
+from datetime import datetime
 from io import StringIO
 from typing import Any, Type, TypeVar, cast, get_origin, get_type_hints
 
@@ -8,11 +10,16 @@ from deepdiff import DeepDiff, Delta
 from deepdiff.operator import BaseOperator
 from deepdiff.path import parse_path
 
-from mesop.exceptions import MesopException
+from mesop.components.uploader.uploaded_file import UploadedFile
+from mesop.exceptions import MesopDeveloperException, MesopException
 
 _PANDAS_OBJECT_KEY = "__pandas.DataFrame__"
+_DATETIME_OBJECT_KEY = "__datetime.datetime__"
 _BYTES_OBJECT_KEY = "__python.bytes__"
+_SET_OBJECT_KEY = "__python.set__"
+_UPLOADED_FILE_OBJECT_KEY = "__mesop.UploadedFile__"
 _DIFF_ACTION_DATA_FRAME_CHANGED = "data_frame_changed"
+_DIFF_ACTION_UPLOADED_FILE_CHANGED = "mesop_uploaded_file_changed"
 
 C = TypeVar("C")
 
@@ -35,7 +42,26 @@ def dataclass_with_defaults(cls: Type[C]) -> Type[C]:
   Provides defaults for every attribute in a dataclass (recursively) so
   Mesop developers don't need to manually set default values
   """
-  pass
+
+  # Make sure that none of the class variables use a mutable default value
+  # which can cause state to be accidentally shared across sessions which can
+  # be very bad!
+  for name in cls.__dict__:
+    # Skip dunder methods/attributes.
+    if name.startswith("__") and name.endswith("__"):
+      continue
+    classVar = cls.__dict__[name]
+    if not isinstance(classVar, Field):
+      try:
+        # If a value is not hashable, then we will treat it as mutable.
+        hash(classVar)
+      except TypeError as exc:
+        error_message = (
+          f"mutable default {type(classVar)} for field {name} is not allowed: use default_factory for state class {cls.__name__}. "
+          "See: https://google.github.io/mesop/guides/state_management/#use-immutable-default-values"
+        )
+        raise MesopDeveloperException(error_message) from exc
+
   annotations = get_type_hints(cls)
   for name, type_hint in annotations.items():
     if name not in cls.__dict__:  # Skip if default already set
@@ -52,11 +78,27 @@ def dataclass_with_defaults(cls: Type[C]) -> Type[C]:
       elif get_origin(type_hint) == dict:
         setattr(cls, name, field(default_factory=dict))
       elif isinstance(type_hint, type):
-        setattr(
-          cls, name, field(default_factory=dataclass_with_defaults(type_hint))
-        )
-
+        if has_parent(type_hint):
+          # If this isn't a simple class (i.e. it inherits from another class)
+          # then we will preserve its semantics (not try to set default values
+          # because it's not a dataclass) and instantiate it with each new instance
+          # of a state class.
+          setattr(cls, name, field(default_factory=type_hint))
+        else:
+          # If it's a simple dataclass (i.e. does not inherit from another class)
+          # then we will try to set default values and then wrap it with a dataclass
+          # decorator (if necessary).
+          setattr(
+            cls, name, field(default_factory=dataclass_with_defaults(type_hint))
+          )
+  # If a class is already a dataclass, then don't wrap it with another dataclass decorator.
+  if is_dataclass(cls):
+    return cls
   return dataclass(cls)
+
+
+def has_parent(cls: Type[Any]) -> bool:
+  return len(cls.__bases__) > 0 and cls.__bases__[0] != object
 
 
 def serialize_dataclass(state: Any):
@@ -87,8 +129,9 @@ def _recursive_update_dataclass_from_json_obj(instance: Any, json_dict: Any):
         updated_list: list[Any] = []
         for item in cast(list[Any], value):
           if isinstance(item, dict):
-            # If the json item value is an instance of dict,
-            # we assume it should be converted into a dataclass
+            # If the json item value is an instance of dict
+            # and the instance has an attribute with a matching name,
+            # we assume the dict should be converted into a dataclass.
             attr = getattr(instance, key)
             item_instance = instance.__annotations__[key].__args__[0]()
             updated_list.append(
@@ -101,6 +144,13 @@ def _recursive_update_dataclass_from_json_obj(instance: Any, json_dict: Any):
       else:
         # For other types, set the value directly.
         setattr(instance, key, value)
+    else:
+      if isinstance(instance, dict):
+        instance[key] = value
+      else:
+        raise MesopException(
+          f"Unhandled stateclass deserialization where key={key}, value={value}, instance={instance}"
+        )
   return instance
 
 
@@ -127,8 +177,24 @@ class MesopJSONEncoder(json.JSONEncoder):
     except ImportError:
       pass
 
+    if isinstance(obj, UploadedFile):
+      return {
+        _UPLOADED_FILE_OBJECT_KEY: {
+          "contents": base64.b64encode(obj.getvalue()).decode("utf-8"),
+          "name": obj.name,
+          "size": obj.size,
+          "mime_type": obj.mime_type,
+        }
+      }
+
+    if isinstance(obj, datetime):
+      return {_DATETIME_OBJECT_KEY: obj.isoformat()}
+
     if isinstance(obj, bytes):
       return {_BYTES_OBJECT_KEY: base64.b64encode(obj).decode("utf-8")}
+
+    if isinstance(obj, set):
+      return {_SET_OBJECT_KEY: list(obj)}
 
     if is_dataclass(obj):
       return asdict(obj)
@@ -155,8 +221,22 @@ def decode_mesop_json_state_hook(dct):
     if _PANDAS_OBJECT_KEY in dct:
       return pd.read_json(StringIO(dct[_PANDAS_OBJECT_KEY]), orient="table")
 
+  if _DATETIME_OBJECT_KEY in dct:
+    return datetime.fromisoformat(dct[_DATETIME_OBJECT_KEY])
+
   if _BYTES_OBJECT_KEY in dct:
     return base64.b64decode(dct[_BYTES_OBJECT_KEY])
+
+  if _SET_OBJECT_KEY in dct:
+    return set(dct[_SET_OBJECT_KEY])
+
+  if _UPLOADED_FILE_OBJECT_KEY in dct:
+    return UploadedFile(
+      base64.b64decode(dct[_UPLOADED_FILE_OBJECT_KEY]["contents"]),
+      name=dct[_UPLOADED_FILE_OBJECT_KEY]["name"],
+      size=dct[_UPLOADED_FILE_OBJECT_KEY]["size"],
+      mime_type=dct[_UPLOADED_FILE_OBJECT_KEY]["mime_type"],
+    )
 
   return dct
 
@@ -189,6 +269,29 @@ class DataFrameOperator(BaseOperator):
     return True
 
 
+class UploadedFileOperator(BaseOperator):
+  """Custom operator to detect changes in UploadedFile class.
+
+  DeepDiff does not diff the UploadedFile class correctly, so we will just use a normal
+  equality check, rather than diffing further into the io.BytesIO parent class.
+
+  This class could probably be made more generic to handle other classes where we want
+  to diff using equality checks.
+  """
+
+  def match(self, level) -> bool:
+    return isinstance(level.t1, UploadedFile) and isinstance(
+      level.t2, UploadedFile
+    )
+
+  def give_up_diffing(self, level, diff_instance) -> bool:
+    if level.t1 != level.t2:
+      diff_instance.custom_report_result(
+        _DIFF_ACTION_UPLOADED_FILE_CHANGED, level, {"value": level.t2}
+      )
+    return True
+
+
 def diff_state(state1: Any, state2: Any) -> str:
   """
   Diffs two state objects and returns the difference using DeepDiff's Delta format as a
@@ -203,11 +306,13 @@ def diff_state(state1: Any, state2: Any) -> str:
     raise MesopException("Tried to diff state which was not a dataclass")
 
   custom_actions = []
-
+  custom_operators = [UploadedFileOperator()]
   # Only use the `DataFrameOperator` if pandas exists.
   if _has_pandas:
     differences = DeepDiff(
-      state1, state2, custom_operators=[DataFrameOperator()]
+      state1,
+      state2,
+      custom_operators=[*custom_operators, DataFrameOperator()],
     )
 
     # Manually format dataframe diffs to flat dict format.
@@ -221,10 +326,24 @@ def diff_state(state1: Any, state2: Any) -> str:
         for path, diff in differences[_DIFF_ACTION_DATA_FRAME_CHANGED].items()
       ]
   else:
-    differences = DeepDiff(state1, state2)
+    differences = DeepDiff(state1, state2, custom_operators=custom_operators)
 
-  return json.dumps(
-    Delta(differences, always_include_values=True).to_flat_dicts()
-    + custom_actions,
-    cls=MesopJSONEncoder,
-  )
+  # Manually format UploadedFile diffs to flat dict format.
+  if _DIFF_ACTION_UPLOADED_FILE_CHANGED in differences:
+    custom_actions = [
+      {
+        "path": parse_path(path),
+        "action": _DIFF_ACTION_UPLOADED_FILE_CHANGED,
+        **diff,
+      }
+      for path, diff in differences[_DIFF_ACTION_UPLOADED_FILE_CHANGED].items()
+    ]
+
+  # Handle the set case which will have a modified path after being JSON encoded.
+  diffs = []
+  for action in Delta(differences, always_include_values=True).to_flat_dicts():
+    if action["action"].startswith("set_item_"):
+      action["path"] = action["path"] + ["__python.set__"]
+    diffs.append(action)
+
+  return json.dumps(diffs + custom_actions, cls=MesopJSONEncoder)

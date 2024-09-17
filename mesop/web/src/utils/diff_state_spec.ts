@@ -339,4 +339,111 @@ describe('applyStateDiff functionality', () => {
       }),
     );
   });
+
+  it('applies updates to list of datetime objects', () => {
+    const state1 = JSON.stringify({
+      dates: [],
+    });
+
+    const diff = JSON.stringify([
+      {
+        'path': ['dates', 0],
+        'value': {'__datetime.datetime__': '2024-12-05T00:00:00+05:30'},
+        'action': 'iterable_item_added',
+      },
+      {
+        'path': ['dates', 1],
+        'value': {'__datetime.datetime__': '1972-02-02T00:00:00+00:00'},
+        'action': 'iterable_item_added',
+      },
+      {
+        'path': ['dates', 2],
+        'value': {'__datetime.datetime__': '2005-10-12T00:00:00-05:00'},
+        'action': 'iterable_item_added',
+      },
+    ]);
+
+    expect(applyStateDiff(state1, diff)).toBe(
+      JSON.stringify({
+        dates: [
+          {'__datetime.datetime__': '2024-12-05T00:00:00+05:30'},
+          {'__datetime.datetime__': '1972-02-02T00:00:00+00:00'},
+          {'__datetime.datetime__': '2005-10-12T00:00:00-05:00'},
+        ],
+      }),
+    );
+  });
+
+  it('applies UploadedFile updates', () => {
+    const state1 = JSON.stringify({
+      data: {
+        '__mesop.UploadedFile__': {
+          'contents': '',
+          'name': '',
+          'size': 0,
+          'mime_type': '',
+        },
+      },
+    });
+    const diff = JSON.stringify([
+      {
+        path: ['data'],
+        action: 'mesop_uploaded_file_changed',
+        value: {
+          '__mesop.UploadedFile__': {
+            'contents': 'data',
+            'name': 'file.png',
+            'size': 10,
+            'mime_type': 'image/png',
+          },
+        },
+      },
+    ]);
+
+    expect(applyStateDiff(state1, diff)).toBe(
+      JSON.stringify({
+        data: {
+          '__mesop.UploadedFile__': {
+            'contents': 'data',
+            'name': 'file.png',
+            'size': 10,
+            'mime_type': 'image/png',
+          },
+        },
+      }),
+    );
+  });
+
+  it('applies updates to sets', () => {
+    const state1 = JSON.stringify({
+      data: {
+        '__python.set__': [1, 3, 5],
+      },
+    });
+    const diff = JSON.stringify([
+      {
+        path: ['data', '__python.set__'],
+        action: 'set_item_added',
+        value: 4,
+      },
+      {
+        path: ['data', '__python.set__'],
+        action: 'set_item_removed',
+        value: 1,
+      },
+      {
+        path: ['data', '__python.set__'],
+        action: 'set_item_added',
+        value: 7,
+      },
+    ]);
+
+    expect(applyStateDiff(state1, diff)).toBe(
+      JSON.stringify({
+        data: {
+          '__python.set__': [3, 5, 4, 7],
+        },
+      }),
+    );
+  });
 });

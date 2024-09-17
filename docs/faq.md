@@ -1,8 +1,3 @@
----
-hide:
-  - navigation
----
-
 # Frequently Asked Questions
 
 ## General
@@ -15,8 +10,7 @@ Demanding consumer-facing apps, which have strict requirements in terms of perfo
 
 ### How does Mesop compare to other Python UI frameworks?
 
-Because every Python UI framework has a differnet set of trade-offs, I recommend reading [Mesop's philosophy for building UIs](https://google.github.io/mesop/blog/2024/05/13/why-mesop/).
-
+We have written a [comparison](./comparison.md) doc to answer this question in-depth.
 
 ### Is Mesop production-ready?
 
@@ -25,6 +19,17 @@ Dozens of teams at Google have used Mesop to build demos and internal apps.
 Although Mesop is pre-v1, we take backwards-compatibilty seriously and avoid backwards incompatible change. This is critical to us because many teams within Google rely on Mesop and we need to not break them.
 
 Occasionally, we will do minor clean-up for our APIs, but we will provide warnings/deprecation notices and provide at least 1 release to migrate to the newer APIs.
+
+### Which modules should I import from Mesop?
+
+Only import from these two modules:
+
+```py
+import mesop as me
+import mesop.labs as mel
+```
+
+All other modules are considered internal implementation details and may change without notice in future releases.
 
 ### Is Mesop an official Google product?
 

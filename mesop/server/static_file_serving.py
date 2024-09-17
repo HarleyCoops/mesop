@@ -1,17 +1,28 @@
 import gzip
 import io
+import mimetypes
 import os
 import re
 import secrets
 from collections import OrderedDict
 from io import BytesIO
 from typing import Any, Callable
+from urllib.parse import urlparse
 
-from flask import Flask, Response, g, request, send_file
+from flask import Flask, Response, g, make_response, request, send_file
 from werkzeug.security import safe_join
 
+from mesop.exceptions import MesopException
 from mesop.runtime import runtime
-from mesop.utils.runfiles import get_runfile_location
+from mesop.server.constants import WEB_COMPONENTS_PATH_SEGMENT
+from mesop.utils import terminal_colors as tc
+from mesop.utils.runfiles import get_runfile_location, has_runfiles
+from mesop.utils.url_utils import sanitize_url_for_csp
+
+# mimetypes are not always set correctly, thus manually
+# setting the mimetype here.
+# See: https://github.com/google/mesop/issues/441
+mimetypes.add_type("application/javascript", ".js")
 
 
 def noop():
@@ -42,7 +53,7 @@ def configure_static_file_serving(
         lines[i] = lines[i].replace("$$INSERT_CSP_NONCE$$", g.csp_nonce)
       if (
         livereload_script_url
-        and line.strip() == "<!-- Inject script (if needed) -->"
+        and line.strip() == "<!-- Inject livereload script (if needed) -->"
       ):
         lines[i] = (
           f'<script src="{livereload_script_url}" nonce={g.csp_nonce}></script>\n'
@@ -71,6 +82,38 @@ def configure_static_file_serving(
     preprocess_request()
     return send_file(retrieve_index_html(), download_name="index.html")
 
+  @app.route("/sandbox_iframe.html")
+  def serve_sandbox_iframe():
+    preprocess_request()
+    return send_file(
+      get_path("sandbox_iframe.html"), download_name="sandbox_iframe.html"
+    )
+
+  @app.route(f"/{WEB_COMPONENTS_PATH_SEGMENT}/<path:path>")
+  def serve_web_components(path: str):
+    if not is_file_path(path):
+      raise MesopException("Unexpected request to " + path)
+    serving_path = (
+      get_runfile_location(path)
+      if has_runfiles()
+      else safe_join(os.getcwd(), path)
+    )
+
+    file_name = os.path.basename(path)
+    file_extension = os.path.splitext(file_name)[1].lower()
+    allowed_extensions = {".js", ".css"}
+    if file_extension not in allowed_extensions:
+      raise MesopException(
+        f"Unexpected file type: {file_extension}. Only {', '.join(allowed_extensions)} files are allowed."
+      )
+
+    if not serving_path:
+      raise MesopException("Unexpected request to " + path)
+    return send_file_compressed(
+      serving_path,
+      disable_gzip_cache=disable_gzip_cache,
+    )
+
   @app.route("/<path:path>")
   def serve_file(path: str):
     preprocess_request()
@@ -81,6 +124,63 @@ def configure_static_file_serving(
       )
     else:
       return send_file(retrieve_index_html(), download_name="index.html")
+
+  @app.route("/__csp__", methods=["POST"])
+  def csp_report():
+    # Get the CSP violation report from the request
+    # Flask expects the MIME type to be application/json
+    # but it's actually application/csp-report
+    report = request.get_json(force=True)
+
+    document_uri: str = report["csp-report"]["document-uri"]
+    path = urlparse(document_uri).path
+    blocked_uri: str = report["csp-report"]["blocked-uri"]
+    # Remove the path from blocked_uri, keeping only the origin.
+    blocked_site = (
+      urlparse(blocked_uri).scheme + "://" + urlparse(blocked_uri).netloc
+    )
+    violated_directive: str = report["csp-report"]["violated-directive"]
+    if violated_directive == "script-src-elem":
+      keyword_arg = "allowed_script_srcs"
+    elif violated_directive == "connect-src":
+      keyword_arg = "allowed_connect_srcs"
+    elif violated_directive == "frame-ancestors":
+      keyword_arg = "allowed_iframe_parents"
+    elif violated_directive in ("require-trusted-types-for", "trusted-types"):
+      keyword_arg = "dangerously_disable_trusted_types"
+    else:
+      raise Exception("Unexpected CSP violation:", violated_directive, report)
+    keyword_arg_value = f"""[
+      '{tc.CYAN}{blocked_site}{tc.RESET}',
+    ]"""
+    if keyword_arg == "dangerously_disable_trusted_types":
+      keyword_arg_value = f"{tc.CYAN}True{tc.RESET}"
+    print(
+      f"""
+{tc.RED}⚠️  Content Security Policy Error  ⚠️{tc.RESET}
+{tc.YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{tc.RESET}
+{tc.CYAN}Directive:{tc.RESET}   {tc.GREEN}{violated_directive}{tc.RESET}
+{tc.CYAN}Blocked URL:{tc.RESET} {tc.GREEN}{blocked_uri}{tc.RESET}
+{tc.CYAN}App path:{tc.RESET}    {tc.GREEN}{path}{tc.RESET}
+
+{tc.YELLOW}ℹ️  If this is coming from your web component,
+   update your security policy like this:{tc.RESET}
+
+{tc.MAGENTA}@me.page({tc.RESET}
+  {tc.BLUE}security_policy={tc.RESET}{tc.MAGENTA}me.SecurityPolicy({tc.RESET}
+    {tc.GREEN}{keyword_arg}={tc.RESET}{keyword_arg_value}
+  {tc.MAGENTA}){tc.RESET}
+{tc.MAGENTA}){tc.RESET}
+
+{tc.YELLOW}For more info:
+{tc.CYAN}https://google.github.io/mesop/web-components/troubleshooting/{tc.RESET}
+{tc.YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{tc.RESET}
+"""  # noqa: RUF001
+    )
+
+    response = make_response()
+    response.status_code = 204
+    return response
 
   @app.before_request
   def generate_nonce():
@@ -105,31 +205,60 @@ def configure_static_file_serving(
     csp = OrderedDict(
       {
         "default-src": "'self'",
-        "font-src": "fonts.gstatic.com",
+        "font-src": "fonts.gstatic.com data:",
         # Mesop app developers should be able to iframe other sites.
-        "frame-src": "'self' https:",
+        "frame-src": "*",
         # Mesop app developers should be able to load images and media from various origins.
         "img-src": "'self' data: https: http:",
         "media-src": "'self' data: https:",
-        "style-src": f"'self' 'nonce-{g.csp_nonce}' fonts.googleapis.com",
         # Need 'unsafe-inline' because we apply inline styles for our components.
         # This is also used by Angular for animations:
         # https://github.com/angular/angular/pull/55260
-        "style-src-attr": "'unsafe-inline'",
+        # Finally, other third-party libraries like Plotly rely on setting stylesheets dynamically.
+        "style-src": "'self' 'unsafe-inline' fonts.googleapis.com",
         "script-src": f"'self' 'nonce-{g.csp_nonce}'",
         # https://angular.io/guide/security#enforcing-trusted-types
-        "trusted-types": "angular angular#unsafe-bypass",
+        "trusted-types": "angular angular#unsafe-bypass lit-html highlight.js",
         "require-trusted-types-for": "'script'",
+        "report-uri": "/__csp__",
       }
     )
+    if page_config and page_config.stylesheets:
+      csp["style-src"] += " " + " ".join(
+        [sanitize_url_for_csp(url) for url in page_config.stylesheets]
+      )
+    security_policy = None
+    if page_config and page_config.security_policy:
+      security_policy = page_config.security_policy
+    if security_policy and security_policy.allowed_connect_srcs:
+      csp["connect-src"] = "'self' " + " ".join(
+        [
+          sanitize_url_for_csp(url)
+          for url in security_policy.allowed_connect_srcs
+        ]
+      )
+    if security_policy and security_policy.allowed_script_srcs:
+      csp["script-src"] += " " + " ".join(
+        [
+          sanitize_url_for_csp(url)
+          for url in security_policy.allowed_script_srcs
+        ]
+      )
+    if security_policy and security_policy.dangerously_disable_trusted_types:
+      del csp["trusted-types"]
+      del csp["require-trusted-types-for"]
+
     if runtime().debug_mode:
       # Allow all origins in debug mode (aka editor mode) because
       # when Mesop is running under Colab, it will be served from
       # a randomly generated origin.
       csp["frame-ancestors"] = "*"
-    elif page_config and page_config.security_policy.allowed_iframe_parents:
+    elif security_policy and security_policy.allowed_iframe_parents:
       csp["frame-ancestors"] = "'self' " + " ".join(
-        list(page_config.security_policy.allowed_iframe_parents)
+        [
+          sanitize_url_for_csp(url)
+          for url in security_policy.allowed_iframe_parents
+        ]
       )
     else:
       csp["frame-ancestors"] = default_allowed_iframe_parents
@@ -139,11 +268,20 @@ def configure_static_file_serving(
       if livereload_origin:
         csp["connect-src"] = f"'self' {livereload_origin}"
 
-    # Set Content-Security-Policy header to restrict resource loading
-    # Based on https://angular.io/guide/security#content-security-policy
-    response.headers["Content-Security-Policy"] = "; ".join(
-      [key + " " + value for key, value in csp.items()]
-    )
+    if request.path == "/sandbox_iframe.html":
+      # Set a minimal CSP to not restrict Mesop app developers.
+      # Need frame-ancestors to ensure other sites do not iframe
+      # this page and exploit it.
+      csp_subset = OrderedDict({"frame-ancestors": csp["frame-ancestors"]})
+      response.headers["Content-Security-Policy"] = "; ".join(
+        [key + " " + value for key, value in csp_subset.items()]
+      )
+    else:
+      # Set Content-Security-Policy header to restrict resource loading
+      # Based on https://angular.io/guide/security#content-security-policy
+      response.headers["Content-Security-Policy"] = "; ".join(
+        [key + " " + value for key, value in csp.items()]
+      )
 
     # Set Referrer-Policy header to control referrer information
     # Recommended by https://web.dev/articles/referrer-best-practices

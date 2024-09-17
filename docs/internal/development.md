@@ -12,6 +12,10 @@ If [ibazel](https://github.com/bazelbuild/bazel-watcher) breaks, but bazel works
 
 > TIP: If your build mysteriously fails due to an npm-related error, try running `bazel clean --expunge && rm -rf node_modules`. Bazel and Yarn have a cache bug when upgrading npm modules.
 
+### uv
+
+We use [uv](https://github.com/astral-sh/uv). Follow the instructions [here](https://docs.astral.sh/uv/#getting-started) to install uv.
+
 ### Commit hooks
 
 1. Install [pre-commit](https://pre-commit.com/#installation)
@@ -22,7 +26,7 @@ If [ibazel](https://github.com/bazelbuild/bazel-watcher) breaks, but bazel works
 We recommend using this for most Mesop framework development.
 
 ```sh
-$ ./scripts/cli.sh
+./scripts/cli.sh
 ```
 
 > NOTE: this automatically serves the angular app.
@@ -34,7 +38,7 @@ $ ./scripts/cli.sh
 If you update `//build_defs/requirements.txt`, run:
 
 ```sh
-$ bazel run //build_defs:pip_requirements.update
+bazel run //build_defs:pip_requirements.update
 ```
 
 ### venv
@@ -42,25 +46,25 @@ $ bazel run //build_defs:pip_requirements.update
 To support IDE type-checking (Pylance) in VS Code, we use Aspect's [rules_py](https://docs.aspect.build/rulesets/aspect_rules_py/) which generates a venv target.
 
 ```sh
-$ bazel run //mesop/cli:cli.venv
+bazel run //mesop/cli:cli.venv
 ```
 
 Then, you can activate the venv:
 
 ```sh
-$ source .cli.venv/bin/activate
+source .cli.venv/bin/activate
 ```
 
 You will need to setup a symlink to have Python IDE support for protos:
 
 ```sh
-$ ./scripts/setup_proto_py_modules.sh
+./scripts/setup_proto_py_modules.sh
 ```
 
 Check that you're using venv's python:
 
 ```sh
-$ which python
+which python
 ```
 
 Copy the python interpreter path and paste it into VS Code.
@@ -68,7 +72,7 @@ Copy the python interpreter path and paste it into VS Code.
 Finally, install third-party dependencies.
 
 ```sh
-$ pip install -r build_defs/requirements_lock.txt
+pip install -r build_defs/requirements_lock.txt
 ```
 
 > NOTE: You may need to run the command with `sudo` if you get a permission denied error, particularly with "\_distutils_hack".

@@ -78,8 +78,11 @@ export function applyComponentDiff(component: Component, diff: ComponentDiff) {
 const STATE_DIFF_VALUES_CHANGED = 'values_changed';
 const STATE_DIFF_TYPE_CHANGES = 'type_changes';
 const STATE_DIFF_DATA_FRAME_CHANGED = 'data_frame_changed';
+const STATE_DIFF_UPLOADED_FILE_CHANGED = 'mesop_uploaded_file_changed';
 const STATE_DIFF_ITERABLE_ITEM_REMOVED = 'iterable_item_removed';
 const STATE_DIFF_ITERABLE_ITEM_ADDED = 'iterable_item_added';
+const STATE_DIFF_SET_ITEM_REMOVED = 'set_item_removed';
+const STATE_DIFF_SET_ITEM_ADDED = 'set_item_added';
 const STATE_DIFF_DICT_ITEM_REMOVED = 'dictionary_item_removed';
 const STATE_DIFF_DICT_ITEM_ADDED = 'dictionary_item_added';
 
@@ -114,7 +117,8 @@ export function applyStateDiff(stateJson: string, diffJson: string): string {
     if (
       row.action === STATE_DIFF_VALUES_CHANGED ||
       row.action === STATE_DIFF_TYPE_CHANGES ||
-      row.action === STATE_DIFF_DATA_FRAME_CHANGED
+      row.action === STATE_DIFF_DATA_FRAME_CHANGED ||
+      row.action === STATE_DIFF_UPLOADED_FILE_CHANGED
     ) {
       updateValue(root, row.path, row.value);
     } else if (row.action === STATE_DIFF_DICT_ITEM_ADDED) {
@@ -123,6 +127,10 @@ export function applyStateDiff(stateJson: string, diffJson: string): string {
       removeObjectValue(root, row.path);
     } else if (row.action === STATE_DIFF_ITERABLE_ITEM_ADDED) {
       addArrayValue(root, row.path, row.value);
+    } else if (row.action === STATE_DIFF_SET_ITEM_ADDED) {
+      addSetValue(root, row.path, row.value);
+    } else if (row.action === STATE_DIFF_SET_ITEM_REMOVED) {
+      removeSetValue(root, row.path, row.value);
     }
   }
 
@@ -145,23 +153,10 @@ function updateValue(root: object, path: (string | number)[], value: any) {
 
 // Adds item to the array at path.
 function addArrayValue(root: object, path: (string | number)[], value: any) {
-  let objectSegment = root;
-  for (let i = 0; i < path.length; ++i) {
-    if (i + 1 === path.length) {
-      // @ts-ignore: Ignore type
-      objectSegment.splice(path[i], 0, value);
-    } else {
-      // Edge case where the array does not exist yet, so we need to create an array
-      // before we can append.
-      //
-      // @ts-ignore: Ignore type
-      if (objectSegment[path[i]] === undefined && i + 2 === path.length) {
-        // @ts-ignore: Ignore type
-        objectSegment[path[i]] = [];
-      }
-      // @ts-ignore: Ignore type
-      objectSegment = objectSegment[path[i]];
-    }
+  const objectSegment = getLastObjectSegment(root, path);
+  if (objectSegment) {
+    // @ts-ignore: Ignore type
+    objectSegment.splice(path[path.length - 1], 0, value);
   }
 }
 
@@ -176,6 +171,27 @@ function removeArrayValue(root: object, path: (string | number)[]) {
       // @ts-ignore: Ignore type
       objectSegment = objectSegment[path[i]];
     }
+  }
+}
+
+// Adds item from the set at path.
+function addSetValue(root: object, path: (string | number)[], value: any) {
+  const objectSegment = getLastObjectSegment(root, path);
+  if (objectSegment) {
+    // @ts-ignore: Ignore type
+    objectSegment[path[path.length - 1]].push(value);
+  }
+}
+
+// Removes item from the set at path.
+function removeSetValue(root: object, path: (string | number)[], value: any) {
+  const objectSegment = getLastObjectSegment(root, path);
+  if (objectSegment) {
+    // @ts-ignore: Ignore type
+    const set = new Set(objectSegment[path[path.length - 1]]);
+    set.delete(value);
+    // @ts-ignore: Ignore type
+    objectSegment[path[path.length - 1]] = [...set];
   }
 }
 
@@ -209,4 +225,28 @@ function removeObjectValue(root: object, path: (string | number)[]) {
       objectSegment = objectSegment[path[i]];
     }
   }
+}
+
+// Helper function for retrieving the last segment from a given path.
+function getLastObjectSegment(
+  root: object,
+  path: (string | number)[],
+): object | null {
+  let objectSegment = root;
+  for (let i = 0; i < path.length; ++i) {
+    if (i + 1 === path.length) {
+      return objectSegment;
+    }
+    // Edge case where the array does not exist yet, so we need to create an array
+    // before we can append.
+    //
+    // @ts-ignore: Ignore type
+    if (objectSegment[path[i]] === undefined && i + 2 === path.length) {
+      // @ts-ignore: Ignore type
+      objectSegment[path[i]] = [];
+    }
+    // @ts-ignore: Ignore type
+    objectSegment = objectSegment[path[i]];
+  }
+  return null;
 }

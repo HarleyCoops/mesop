@@ -27,11 +27,16 @@ import {
   HotReloadWatcher,
   DefaultHotReloadWatcher,
 } from '../services/hot_reload_watcher';
-import {Shell} from '../shell/shell';
+import {Shell, registerComponentRendererElement} from '../shell/shell';
 import {EditorService, SelectionMode} from '../services/editor_service';
 import {Channel} from '../services/channel';
+import {EditorToolbar} from '../editor_toolbar/editor_toolbar';
 import {isMac} from '../utils/platform';
-import {CommandDialogService} from '../dev_tools/command_dialog/command_dialog_service';
+import {
+  DebugErrorDialogService,
+  ErrorDialogService,
+} from '../services/error_dialog_service';
+import {ExperimentService} from '../services/experiment_service';
 // Keep the following comment to ensure there's a hook for adding TS imports in the downstream sync.
 // ADD_TS_IMPORT_HERE
 
@@ -43,6 +48,7 @@ import {CommandDialogService} from '../dev_tools/command_dialog/command_dialog_s
     CommonModule,
     ComponentRenderer,
     MatProgressBarModule,
+    EditorToolbar,
     ErrorBox,
     DevTools,
     MatIconModule,
@@ -75,6 +81,7 @@ class Editor {
     private router: Router,
     private editorService: EditorService,
     private channel: Channel,
+    private experimentService: ExperimentService,
   ) {
     iconRegistry.setDefaultFontSetClass('material-symbols-rounded');
     this.renderer.setAttribute(
@@ -156,6 +163,10 @@ class Editor {
       return;
     }
   }
+
+  showEditorToolbar(): boolean {
+    return this.experimentService.experimentalEditorToolbarEnabled;
+  }
 }
 
 const routes: Routes = [{path: '**', component: Editor}];
@@ -163,36 +174,15 @@ const routes: Routes = [{path: '**', component: Editor}];
 @Injectable()
 class EditorServiceImpl implements EditorService {
   selectionMode: SelectionMode = SelectionMode.DISABLED;
+  onSelectedComponent: ((component: ComponentProto) => void) | undefined;
   constructor(
     private channel: Channel,
     private devToolsSettings: DevToolsSettings,
-    private commandDialogService: CommandDialogService,
   ) {}
 
   indexPath: number[] | undefined;
   isEditorMode(): boolean {
     return true;
-  }
-
-  async addComponentSibling(component: ComponentProto) {
-    await this.commandDialogService.openDialog(component, {
-      newComponentMode: 'appendSibling',
-    });
-    this.setFocusedComponent(component);
-    if (!this.indexPath) return;
-    this.indexPath[this.indexPath.length - 1] =
-      this.indexPath[this.indexPath.length - 1] + 1;
-    this.setSelectionMode(SelectionMode.SELECTED);
-  }
-
-  async addComponentChild(component: ComponentProto) {
-    await this.commandDialogService.openDialog(component, {
-      newComponentMode: 'addChild',
-    });
-    this.setFocusedComponent(component);
-    if (!this.indexPath) return;
-    this.indexPath.push(component.getChildrenList().length);
-    this.setSelectionMode(SelectionMode.SELECTED);
   }
 
   getSelectionMode(): SelectionMode {
@@ -201,6 +191,13 @@ class EditorServiceImpl implements EditorService {
 
   setSelectionMode(mode: SelectionMode): void {
     this.selectionMode = mode;
+    if (mode === SelectionMode.SELECTED) {
+      this.onSelectedComponent?.(this.getFocusedComponent()!);
+    }
+  }
+
+  setOnSelectedComponent(callback: (component: ComponentProto) => void) {
+    this.onSelectedComponent = callback;
   }
 
   toggleSelectionMode(): void {
@@ -216,10 +213,6 @@ class EditorServiceImpl implements EditorService {
   }
 
   setFocusedComponent(component: ComponentProto): void {
-    if (!this.devToolsSettings.showDevTools()) {
-      // Do not focus component if devtools isn't open.
-      return;
-    }
     const root = this.channel.getRootComponent();
     if (!root) {
       throw new Error('No root component');
@@ -272,16 +265,21 @@ function findPath(
 @Component({
   selector: 'mesop-editor-app',
   template: '<router-outlet></router-outlet>',
-  standalone: true,
-  providers: [{provide: EditorService, useClass: EditorServiceImpl}],
   imports: [Editor, RouterOutlet],
+  standalone: true,
 })
 class MesopEditorApp {}
 
-export function bootstrapApp() {
-  bootstrapApplication(MesopEditorApp, {
-    providers: [provideAnimations(), provideRouter(routes)],
+export async function bootstrapApp() {
+  const app = await bootstrapApplication(MesopEditorApp, {
+    providers: [
+      provideAnimations(),
+      provideRouter(routes),
+      {provide: EditorService, useClass: EditorServiceImpl},
+      {provide: ErrorDialogService, useClass: DebugErrorDialogService},
+    ],
   });
+  registerComponentRendererElement(app);
 }
 
 export const TEST_ONLY = {EditorServiceImpl};

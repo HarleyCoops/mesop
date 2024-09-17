@@ -3,9 +3,9 @@ from typing import Any, Callable
 
 import pytest
 
-from mesop.colab import colab_utils
 from mesop.colab.colab_run import colab_run
 from mesop.runtime import runtime
+from mesop.utils import colab_utils
 
 
 class FakeThread:
@@ -20,6 +20,7 @@ class FakeThread:
 def setup(monkeypatch: pytest.MonkeyPatch):
   monkeypatch.setattr(threading, "Thread", FakeThread)
   monkeypatch.setattr(colab_utils, "is_running_in_colab", lambda: True)
+  monkeypatch.setattr(colab_utils, "is_running_ipython", lambda: True)
 
 
 def test_colab_run_prod_mode():

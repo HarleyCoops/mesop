@@ -5,7 +5,6 @@ import {
   Type,
 } from 'mesop/mesop/protos/ui_jspb_proto_pb/mesop/protos/ui_pb';
 import {SidenavType} from 'mesop/mesop/components/sidenav/sidenav_jspb_proto_pb/mesop/components/sidenav/sidenav_pb';
-import {Channel} from '../../web/src/services/channel';
 import {MatSidenavModule} from '@angular/material/sidenav';
 import {formatStyle} from '../../web/src/utils/styles';
 
@@ -20,9 +19,6 @@ export class SidenavComponent {
   @Input() key!: Key;
   @Input() style!: Style;
   private _config!: SidenavType;
-  isChecked = false;
-
-  constructor(private readonly channel: Channel) {}
 
   ngOnChanges() {
     this._config = SidenavType.deserializeBinary(

@@ -39,6 +39,7 @@ ts_library = _ts_library
 ANGULAR_CORE_DEPS = [
     "@npm//@angular/compiler",
     "@npm//@angular/router",
+    "@npm//@angular/elements",
 ]
 
 ANGULAR_MATERIAL_TS_DEPS = [
@@ -65,32 +66,35 @@ THIRD_PARTY_JS_RXJS = [
     "@npm//rxjs",
 ]
 
+THIRD_PARTY_JS_CODEMIRROR = [
+    "@npm//codemirror",
+    "@npm//@codemirror/lang-python",
+    "@npm//@codemirror/merge",
+    "@npm//@codemirror/theme-one-dark",
+]
+
+THIRD_PARTY_JS_HIGHLIGHTJS = [
+    "@npm//highlight.js",
+]
+
 THIRD_PARTY_PY_ABSL_PY = [
     requirement("absl-py"),
+]
+
+THIRD_PARTY_PY_FIREBASE_ADMIN = [
+    requirement("firebase-admin"),
 ]
 
 THIRD_PARTY_PY_FLASK = [
     requirement("flask"),
 ]
 
-THIRD_PARTY_PY_LIBCST = [
-    requirement("libcst"),
-]
-
 THIRD_PARTY_PY_MATPLOTLIB = [
     requirement("matplotlib"),
 ]
 
-THIRD_PARTY_PY_MARKDOWN = [
-    requirement("markdown"),
-]
-
 THIRD_PARTY_PY_PYDANTIC = [
     requirement("pydantic"),
-]
-
-THIRD_PARTY_PY_PYGMENTS = [
-    requirement("pygments"),
 ]
 
 THIRD_PARTY_PY_PYTEST = [
@@ -107,4 +111,20 @@ THIRD_PARTY_PY_PANDAS = [
 
 THIRD_PARTY_PY_DEEPDIFF = [
     requirement("deepdiff"),
+]
+
+THIRD_PARTY_PY_DOTENV = [
+    requirement("python-dotenv"),
+]
+
+THIRD_PARTY_PY_MSGPACK = [
+    requirement("msgpack"),
+]
+
+THIRD_PARTY_PY_SQLALCHEMY = [
+    requirement("sqlalchemy"),
+]
+
+THIRD_PARTY_PY_GREENLET = [
+    requirement("greenlet"),
 ]
