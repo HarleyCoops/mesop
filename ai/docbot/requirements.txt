@@ -28,7 +28,7 @@ bm25s==0.1.10
     # via llama-index-retrievers-bm25
 cachetools==5.5.0
     # via google-auth
-certifi==2024.7.4
+certifi==2026.4.22
     # via
     #   httpcore
     #   httpx
@@ -43,7 +43,7 @@ dataclasses-json==0.6.7
     # via
     #   llama-index-core
     #   llama-index-legacy
-deepdiff==6.7.1
+deepdiff==8.6.2
     # via mesop
 deprecated==1.2.14
     # via
@@ -57,7 +57,7 @@ distro==1.9.0
     # via openai
 exceptiongroup==1.2.2
     # via anyio
-flask==3.0.3
+flask==3.1.3
     # via mesop
 frozenlist==1.4.1
     # via
@@ -118,7 +118,7 @@ httpx==0.27.0
     #   llama-index-core
     #   llama-index-legacy
     #   openai
-idna==3.8
+idna==3.15
     # via
     #   anyio
     #   httpx
@@ -126,7 +126,7 @@ idna==3.8
     #   yarl
 itsdangerous==2.2.0
     # via flask
-jinja2==3.1.4
+jinja2==3.1.6
     # via flask
 jiter==0.5.0
     # via openai
@@ -222,7 +222,7 @@ networkx==3.3
     # via
     #   llama-index-core
     #   llama-index-legacy
-nltk==3.9.1
+nltk==3.9.4
     # via
     #   llama-index-core
     #   llama-index-legacy
@@ -248,7 +248,7 @@ pandas==2.2.2
     # via
     #   llama-index-core
     #   llama-index-legacy
-pillow==10.4.0
+pillow==12.2.0
     # via
     #   llama-index-core
     #   llama-index-llms-gemini
@@ -256,7 +256,7 @@ proto-plus==1.24.0
     # via
     #   google-ai-generativelanguage
     #   google-api-core
-protobuf==4.25.4
+protobuf==5.29.6
     # via
     #   google-ai-generativelanguage
     #   google-api-core
@@ -265,7 +265,7 @@ protobuf==4.25.4
     #   grpcio-status
     #   mesop
     #   proto-plus
-pyasn1==0.6.0
+pyasn1==0.6.3
     # via
     #   pyasn1-modules
     #   rsa
@@ -290,7 +290,7 @@ pystemmer==2.2.0.1
     # via llama-index-retrievers-bm25
 python-dateutil==2.9.0.post0
     # via pandas
-python-dotenv==1.0.1
+python-dotenv==1.2.2
     # via mesop
 pytz==2024.1
     # via pandas
@@ -300,7 +300,7 @@ regex==2024.7.24
     # via
     #   nltk
     #   tiktoken
-requests==2.32.3
+requests==2.33.0
     # via
     #   google-api-core
     #   llama-index-core
@@ -360,11 +360,11 @@ tzdata==2024.1
     # via pandas
 uritemplate==4.1.1
     # via google-api-python-client
-urllib3==2.2.2
+urllib3==2.7.0
     # via requests
 watchdog==4.0.2
     # via mesop
-werkzeug==3.0.4
+werkzeug==3.1.6
     # via flask
 wrapt==1.16.0
     # via
