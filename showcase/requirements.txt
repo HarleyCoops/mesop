@@ -1,2 +1,2 @@
-mesop>=0.11.1
+mesop>=1.3.0
 gunicorn>=22.0.0
