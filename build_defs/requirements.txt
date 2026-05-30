@@ -1,6 +1,6 @@
 flask
 absl-py
-deepdiff==8.*
+deepdiff==9.*
 msgpack
 protobuf
 pydantic
