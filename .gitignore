@@ -28,3 +28,9 @@ site/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Environment files may contain credentials
+.env.*
+!.env.example
+!.env.sample
+!.env.template
